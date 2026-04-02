@@ -2,9 +2,10 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy"
-    content="default-src 'self' 'unsafe-inline' file: data:; connect-src https://huggingface.co https://*.huggingface.co https://cdn-lfs.huggingface.co https://cdn-lfs-us-1.huggingface.co; img-src * data: blob:;">
   <title>Diphoria AI</title>
+
+  <!-- Inline base styles so body is always dark, even if external CSS is delayed -->
+  <style>html,body{height:100%;background:#0a0a0f;color:#e8eaf6;margin:0;overflow:hidden;}</style>
 
   <!-- CodeMirror 5 — replaces Monaco (30× lighter, ~500 KB vs 30 MB) -->
   <link rel="stylesheet" href="../node_modules/codemirror/lib/codemirror.css">
