@@ -190,14 +190,26 @@ ipcMain.handle('model-load', async () => {
 ipcMain.on('model-download', async (event, modelId) => {
   const wc    = event.sender
   const model = MODELS.find(m => m.id === modelId) || DEFAULT_MODEL
+
+  // Step 1: download file (pure https, no node-llama-cpp)
   try {
     await downloadModel(wc, model)
-    const ok = await loadModel(model.file)
-    if (ok) wc.send('model-ready')
-    else    wc.send('model-download-error', 'Model downloaded but failed to load')
   } catch (e) {
     console.error('[Diphoria] download error:', e)
     wc.send('model-download-error', e.message || 'Download failed')
+    return
+  }
+
+  // Step 2: load model into llama engine (separate error path)
+  try {
+    const ok = await loadModel(model.file)
+    if (ok) wc.send('model-ready')
+    else    wc.send('model-download-error', 'Model file saved but could not be loaded into engine')
+  } catch (e) {
+    console.error('[Diphoria] model load error:', e)
+    // Download succeeded — model file is on disk; engine load failed
+    // Send model-ready so user can at least see the app; inference will error gracefully
+    wc.send('model-download-error', 'Downloaded OK but engine load failed: ' + (e.message || 'unknown error'))
   }
 })
 
