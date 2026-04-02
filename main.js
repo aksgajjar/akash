@@ -7,11 +7,16 @@ let mainWindow
 let historyFilePath
 let modelsPath
 
-// ─── node-llama-cpp v2 (CommonJS, works with Node 18 / Electron 28) ──────────
-const { LlamaModel, LlamaContext, LlamaChatSession } = require('node-llama-cpp')
-
-let llamaModel      = null   // LlamaModel instance
+// ─── node-llama-cpp (ESM, loaded via dynamic import to stay in CJS main) ─────
+let llamaLib        = null
+let llamaEngine     = null
+let llamaModel      = null
 let loadedModelPath = null
+
+async function getLlamaLib() {
+  if (!llamaLib) llamaLib = await import('node-llama-cpp')
+  return llamaLib
+}
 
 // ─── Available models (first is default) ─────────────────────────────────────
 const MODELS = [
@@ -41,16 +46,24 @@ function modelExists(modelFile) {
   try { return fs.existsSync(modelFilePath(modelFile)) } catch { return false }
 }
 
-// ─── Load a GGUF model (v2 API — sync constructor, works with Node 18) ───────
+// ─── Load a GGUF model ────────────────────────────────────────────────────────
 async function loadModel(modelFile) {
   const mp = modelFilePath(modelFile)
   if (!fs.existsSync(mp)) return false
   if (loadedModelPath === mp && llamaModel) return true  // already loaded
 
-  llamaModel      = null
-  loadedModelPath = null
+  const { getLlama } = await getLlamaLib()
+  if (!llamaEngine) {
+    llamaEngine = await getLlama({ progressLogs: false })
+    console.log('[Diphoria] LLaMA engine ready — backend:', llamaEngine.gpu ?? 'cpu')
+  }
 
-  llamaModel      = new LlamaModel({ modelPath: mp })
+  if (llamaModel) {
+    try { await llamaModel.dispose() } catch {}
+    llamaModel = null; loadedModelPath = null
+  }
+
+  llamaModel      = await llamaEngine.loadModel({ modelPath: mp })
   loadedModelPath = mp
   console.log('[Diphoria] Model loaded:', modelFile)
   return true
@@ -220,19 +233,22 @@ ipcMain.on('ai-stream-start', async (event, { html, instruction, systemPrompt })
 
   let fullText = ''
   try {
-    // v2 API: LlamaContext + LlamaChatSession (CJS, Node 18 compatible)
-    const context = new LlamaContext({ model: llamaModel, contextSize: PERF.contextSize })
-    const session = new LlamaChatSession({ context, systemPrompt: SYSTEM })
+    const { LlamaChatSession } = await getLlamaLib()
+    const context = await llamaModel.createContext({ contextSize: PERF.contextSize })
+    const session = new LlamaChatSession({
+      contextSequence: context.getSequence(),
+      systemPrompt:    SYSTEM,
+    })
 
     await session.prompt(`INSTRUCTION: ${instruction}\n\nHTML:\n${html}`, {
       maxTokens:   PERF.maxTokens,
       temperature: PERF.temperature,
-      onToken(chunk) {
-        const text = llamaModel.detokenize(chunk)
+      onTextChunk(text) {
         fullText += text
         wc.send('ai-stream-chunk', text)
       },
     })
+    try { await context.dispose() } catch {}
 
     wc.send('ai-stream-done', { html: fullText, raw: fullText })
   } catch (e) {

@@ -6,6 +6,7 @@
   "scripts": {
     "start": "electron .",
     "dev": "electron . --enable-logging",
+    "postinstall": "node scripts/patch-node18.js",
     "build:mac": "electron-builder --mac --arm64",
     "build:all": "electron-builder --mac --arm64 --x64"
   },
@@ -15,7 +16,7 @@
   },
   "dependencies": {
     "codemirror": "^5.65.16",
-    "node-llama-cpp": "^2.9.1"
+    "node-llama-cpp": "^3.1.1"
   },
   "build": {
     "appId": "com.diphoria.ai",
