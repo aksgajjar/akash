@@ -412,8 +412,8 @@ function extractSectionForAI(html, instruction) {
 
 // Splice AI snippet back into the original full HTML
 function spliceSnippetBack(fullHtml, snippet, mode) {
-  // If snippet looks like full HTML, use it directly
-  if (/<!DOCTYPE|<html/i.test(snippet)) return snippet;
+  // Full rewrite mode or AI returned a complete document — use directly
+  if (mode === 'full' || /<!DOCTYPE|<html/i.test(snippet)) return snippet;
 
   if (mode === 'style-only') {
     const replaced = fullHtml.replace(/<style[^>]*>[\s\S]*?<\/style>/i, snippet);
@@ -627,7 +627,7 @@ async function sendMessage() {
     }
   }
 
-  // ── ROUTE 2: AI Partial Edit — extract section, get snippet, splice back ──
+  // ── ROUTE 2: AI Full Rewrite ──────────────────────────────────────────────
   if (S.isStreaming) return;
   S.isStreaming = true;
   setSendBusy(true);
@@ -635,16 +635,12 @@ async function sendMessage() {
 
   const aiBubble = appendMessage('ai', `<div class="msg-bubble streaming">Sending to AI...</div>`, 'streaming');
 
-  // Extract only relevant section — NOT full HTML
-  const { snippet, mode } = extractSectionForAI(html, instruction);
+  // Always send full HTML — allows layout changes and full document rewrites
+  const mode = 'full';
 
-  // Minimal system prompt — request snippet back, not full HTML
-  const systemPrompt = `You are an HTML/CSS editor. Modify ONLY what the instruction says. ` +
-    `Return ONLY the modified HTML/CSS snippet — not the full document. ` +
-    (S.safeMode ? 'Safe mode: change only the targeted section. ' : '') +
-    `No explanations, no markdown fences. Keep all IDs, classes, structure intact.`;
+  const systemPrompt = buildSystemPrompt(instruction, html);
 
-  const userContent = `INSTRUCTION: ${instruction}\n\nHTML SNIPPET (mode: ${mode}):\n${snippet}`;
+  const userContent = `INSTRUCTION: ${instruction}\n\nHTML:\n${html}`;
 
   let raw = '';
   let tokenCount = 0;
@@ -672,7 +668,7 @@ async function sendMessage() {
     setSendBusy(false);
 
     const rawResponse = (result && result.html) ? result.html : raw;
-    // Splice snippet response back into full HTML
+    // Full rewrite: use AI response directly; splice only if AI returned a partial snippet
     const merged = spliceSnippetBack(html, rawResponse.trim(), mode);
     // Validate merged result
     if (S.validateMode) {
@@ -695,7 +691,7 @@ async function sendMessage() {
     if (aiBubble) {
       aiBubble.classList.remove('streaming');
       aiBubble.querySelector('.msg-bubble').innerHTML =
-        `✓ Applied via AI (${tokenCount} tokens · mode: ${mode})`;
+        `✓ Applied via AI (${tokenCount} tokens)`;
     }
     showToast('Changes applied', 'ok');
   });

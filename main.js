@@ -209,12 +209,12 @@ ipcMain.on('model-download', async (event, modelId) => {
 
 // ─── AI streaming inference ───────────────────────────────────────────────────
 const PERF = {
-  contextSize: 2048,
-  maxTokens:   1024,
+  contextSize: 4096,
+  maxTokens:   2048,
   temperature: 0.05,
 }
 
-const DEFAULT_SYSTEM = `You are Diphoria AI, a senior HTML/CSS/JS developer. Apply the instruction and return ONLY the complete updated HTML snippet. No markdown fences, no explanations. Mark edits with <!-- DIPHORIA-EDIT: description -->.`
+const DEFAULT_SYSTEM = `You are Diphoria AI, a senior HTML/CSS/JS developer. Apply the instruction and return ONLY the complete updated HTML document. No markdown fences, no explanations. Mark edits with <!-- DIPHORIA-EDIT: description -->.`
 
 ipcMain.on('ai-stream-start', async (event, { html, instruction, systemPrompt }) => {
   const wc = event.sender
