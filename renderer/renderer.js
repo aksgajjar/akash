@@ -1,7 +1,7 @@
 'use strict';
 
 // ─── Defaults & State ─────────────────────────────────────────────────────────
-const STORAGE_KEY = 'html-ai-studio-v2';
+const STORAGE_KEY = 'diphoria-ai-v1';
 
 const defaults = {
   ollamaHost:    'localhost',
@@ -12,16 +12,26 @@ const defaults = {
   fontSize:      13,
   wordWrap:      'on',
   minimap:       false,
+  safeMode:      true,
+  thinkMode:     false,
+  learningMode:  true,
+  validateMode:  true,
 };
 
 const S = {
-  settings:         { ...defaults },
-  history:          [],
-  currentFile:      '',
-  lastHtmlBeforeAI: '',
-  isStreaming:      false,
-  previewTimer:     null,
-  streamCleanup:    [],
+  settings:          { ...defaults },
+  history:           [],
+  currentFile:       '',
+  lastHtmlBeforeAI:  '',
+  isStreaming:       false,
+  previewTimer:      null,
+  streamCleanup:     [],
+  safeMode:          true,
+  thinkMode:         false,
+  learningMode:      true,
+  validateMode:      true,
+  pendingImageBase64: null,
+  pendingImageName:  '',
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -95,6 +105,217 @@ function applySettingsToMonaco(editor) {
     wordWrap:  S.settings.wordWrap,
     minimap:   { enabled: !!S.settings.minimap },
   });
+}
+
+// ─── Learning Mode ────────────────────────────────────────────────────────────
+const LEARN_KEY = 'diphoria-ai-learning';
+const MAX_LEARN = 10;
+
+function loadLearning() {
+  try {
+    return JSON.parse(localStorage.getItem(LEARN_KEY) || '{"instructions":[],"prefs":{}}');
+  } catch {
+    return { instructions: [], prefs: {} };
+  }
+}
+
+function saveLearning(data) {
+  localStorage.setItem(LEARN_KEY, JSON.stringify(data));
+}
+
+function addToLearning(instruction) {
+  const data = loadLearning();
+  data.instructions = [instruction, ...data.instructions].slice(0, MAX_LEARN);
+  const all = data.instructions.join(' ').toLowerCase();
+  if (/dark|dark mode|andhera/.test(all))       data.prefs.theme  = 'dark';
+  if (/compact|minimal|chhota/.test(all))       data.prefs.layout = 'compact';
+  if (/dashboard|chart|graph/.test(all))        data.prefs.style  = 'dashboard';
+  if (/animation|smooth|transition/.test(all))  data.prefs.motion = 'animated';
+  if (/clean|format|indent/.test(all))          data.prefs.code   = 'clean';
+  saveLearning(data);
+  updateLearnBadge(data);
+}
+
+function buildLearningContext() {
+  const data = loadLearning();
+  if (!data.instructions.length) return '';
+  let ctx = `Recent instructions (last ${data.instructions.length}):\n`;
+  ctx += data.instructions.slice(0, 5).map((ins, i) => `${i + 1}. "${ins}"`).join('\n');
+  if (Object.keys(data.prefs).length) {
+    ctx += `\nDetected preferences: ${JSON.stringify(data.prefs)}`;
+  }
+  return ctx;
+}
+
+function updateLearnBadge(data) {
+  const badge = $('learn-badge');
+  if (!badge) return;
+  const hasData = data && data.instructions.length > 0;
+  badge.classList.toggle('active', hasData);
+  if (hasData) badge.title = `Learning: ${data.instructions.length} instructions remembered`;
+}
+
+function clearLearning() {
+  saveLearning({ instructions: [], prefs: {} });
+  updateLearnBadge({ instructions: [], prefs: {} });
+  showToast('Learning data cleared');
+}
+
+// ─── HTML Validation ──────────────────────────────────────────────────────────
+function validateHTML(html) {
+  if (!html || !html.trim()) return { valid: false, error: 'Empty content from AI' };
+  const trimmed = html.trim();
+  if (!/<[^>]+>/.test(trimmed)) return { valid: false, error: 'AI returned text instead of HTML' };
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(html, 'text/html');
+  const parseErr = doc.querySelector('parsererror');
+  if (parseErr) return { valid: false, error: 'HTML parse error: ' + parseErr.textContent.slice(0, 80) };
+  if (!doc.body || doc.body.innerHTML.trim() === '') {
+    return { valid: false, error: 'AI returned empty HTML body' };
+  }
+  return { valid: true };
+}
+
+// ─── Auto Backup ──────────────────────────────────────────────────────────────
+function autoBackup(html, instruction) {
+  addHistory(`[PRE-EDIT] ${instruction.slice(0, 60)}`, html);
+}
+
+// ─── Smart Prompt Engine ──────────────────────────────────────────────────────
+function detectSections(html) {
+  const sections = [];
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  if (doc.querySelector('header, nav, .header, .nav, #header, #nav')) sections.push('header/nav');
+  if (doc.querySelector('main, .main, #main, .content, #content'))    sections.push('main content');
+  if (doc.querySelector('footer, .footer, #footer'))                  sections.push('footer');
+  if (doc.querySelector('.dashboard, #dashboard, .chart, canvas'))    sections.push('dashboard/charts');
+  if (doc.querySelector('form, input, .form, #form'))                 sections.push('form/inputs');
+  if (doc.querySelector('.hero, #hero, .banner, #banner'))            sections.push('hero/banner');
+  if (doc.querySelector('table, .table'))                             sections.push('table');
+  if (doc.querySelector('.sidebar, #sidebar, aside'))                 sections.push('sidebar');
+  return sections;
+}
+
+function buildSystemPrompt(instruction, html) {
+  const safeRules = S.safeMode ? `
+SAFE EDIT MODE (ACTIVE — MANDATORY):
+- Identify the SPECIFIC section the instruction refers to
+- Modify ONLY that section — leave everything else EXACTLY as-is
+- Preserve ALL: IDs, class names, data attributes, scripts, structure
+- If the change would require restructuring >30% of the HTML, describe what you would do instead of making the change
+- Add HTML comments where you made changes: <!-- DIPHORIA-EDIT: description -->
+` : `
+You may modify any part of the HTML needed to fulfill the instruction.
+Add HTML comments where you made changes: <!-- DIPHORIA-EDIT: description -->
+`;
+
+  const thinkRules = S.thinkMode ? `
+THINK MODE (ACTIVE):
+Before making changes, output a brief analysis block:
+<!-- THINK:
+  Section identified: [which section]
+  Approach: [what you'll do]
+  Risk: [any potential side effects]
+-->
+Then apply the changes.
+` : '';
+
+  const sections = detectSections(html);
+  const sectionContext = sections.length > 0
+    ? `\nDetected sections in this HTML: ${sections.join(', ')}`
+    : '';
+
+  const learnCtx = S.learningMode ? buildLearningContext() : '';
+  const learnBlock = learnCtx
+    ? `\nUSER PREFERENCES (learned from history — apply gently if relevant):\n${learnCtx}\n`
+    : '';
+
+  const imgBlock = S.pendingImageBase64
+    ? `\nA REFERENCE IMAGE has been provided. Analyze its layout, spacing, and color scheme. Use as inspiration only — do not copy exactly.\n`
+    : '';
+
+  return `You are Diphoria AI — a world-class senior HTML/CSS/JavaScript developer with 10+ years of experience.
+You understand instructions in BOTH English and Hindi fluently.
+
+CORE RULES:
+1. Return ONLY the complete, updated HTML document — nothing else
+2. No markdown code fences, no explanations, no text before or after
+3. Start with <!DOCTYPE html> and end with </html>
+4. Preserve ALL content that is NOT mentioned in the instruction
+${safeRules}${thinkRules}${sectionContext}${learnBlock}${imgBlock}
+QUALITY STANDARDS:
+- Dark mode → CSS custom properties, not just black backgrounds
+- Mobile responsive → proper breakpoints, touch-friendly targets
+- Animations → smooth, GPU-accelerated, purposeful
+- Clean code → 2-space indentation, logical structure`;
+}
+
+// ─── Image Upload ─────────────────────────────────────────────────────────────
+async function handleImageUpload(file) {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      S.pendingImageBase64 = e.target.result;
+      S.pendingImageName = file.name;
+      const strip = $('img-preview-strip');
+      const thumb = $('img-preview-thumb');
+      const name  = $('img-preview-name');
+      if (strip) strip.classList.remove('hidden');
+      if (thumb) thumb.src = e.target.result;
+      if (name)  name.textContent = file.name;
+      const uploadBtn = $('btn-image-upload');
+      if (uploadBtn) uploadBtn.classList.add('has-image');
+      showToast('Image loaded — AI will use as reference', 'ok');
+      resolve(e.target.result);
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function removeImage() {
+  S.pendingImageBase64 = null;
+  S.pendingImageName = '';
+  const strip = $('img-preview-strip');
+  if (strip) strip.classList.add('hidden');
+  const uploadBtn = $('btn-image-upload');
+  if (uploadBtn) uploadBtn.classList.remove('has-image');
+}
+
+// ─── HTML File Upload ─────────────────────────────────────────────────────────
+function handleHtmlUpload(file) {
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    applyHtmlToEditor(e.target.result);
+    S.currentFile = file.name;
+    const el = $('filename');
+    if (el) el.textContent = file.name;
+    showToast('Loaded: ' + file.name, 'ok');
+  };
+  reader.readAsText(file);
+}
+
+// ─── Safe / Think Mode Toggles ────────────────────────────────────────────────
+function toggleSafeMode() {
+  S.safeMode = !S.safeMode;
+  S.settings.safeMode = S.safeMode;
+  saveSettings();
+  const btn = $('btn-safe-mode');
+  if (btn) {
+    btn.className = 'mode-badge ' + (S.safeMode ? 'safe-on' : 'safe-off');
+    btn.title = S.safeMode ? 'Safe Mode ON — click to disable' : 'Safe Mode OFF — click to enable';
+  }
+  showToast(S.safeMode ? '🛡 Safe Mode enabled' : '⚠ Safe Mode disabled', S.safeMode ? 'ok' : '');
+}
+
+function toggleThinkMode() {
+  S.thinkMode = !S.thinkMode;
+  S.settings.thinkMode = S.thinkMode;
+  saveSettings();
+  const btn = $('btn-think-mode');
+  if (btn) {
+    btn.className = 'mode-badge ' + (S.thinkMode ? 'think-on' : 'think-off');
+  }
+  showToast(S.thinkMode ? '🧠 Think Mode enabled' : '💨 Think Mode disabled');
 }
 
 // ─── Ollama Health ────────────────────────────────────────────────────────────
@@ -193,7 +414,7 @@ function cleanupStream() {
 
 async function sendMessage() {
   if (S.isStreaming) return;
-  const input = $('chat-input');
+  const input    = $('chat-input');
   const modelSel = $('model-select');
   if (!input) return;
   const instruction = input.value.trim();
@@ -201,80 +422,132 @@ async function sendMessage() {
 
   const editor = window._monacoEditor;
   const html = editor ? editor.getValue() : '';
+  if (!html.trim()) { showToast('Paste some HTML first', 'err'); return; }
 
-  const model = modelSel ? modelSel.value : S.settings.defaultModel;
+  const model      = modelSel ? modelSel.value : S.settings.defaultModel;
   const ollamaHost = S.settings.ollamaHost || 'localhost';
+
+  // 1. Record to learning
+  if (S.learningMode) addToLearning(instruction);
+
+  // 2. Auto backup BEFORE edit
+  autoBackup(html, instruction);
 
   input.value = '';
   input.style.height = 'auto';
 
-  appendMessage('user', escapeHtml(instruction));
+  appendMessage('user', `<div class="msg-bubble">${escapeHtml(instruction)}</div>`);
 
   S.isStreaming = true;
   setSendBusy(true);
 
-  const aiBubble = appendMessage('ai', 'Thinking...', 'streaming');
-  let raw = '';
-  let tokenCount = 0;
+  const statusText = S.thinkMode ? 'Analyzing HTML structure...' : 'Thinking...';
+  const aiBubble   = appendMessage('ai', `<div class="msg-bubble streaming">${statusText}</div>`, 'streaming');
 
+  let raw        = '';
+  let tokenCount = 0;
   S.lastHtmlBeforeAI = html;
 
+  // 3. Build smart system prompt
+  const systemPrompt = buildSystemPrompt(instruction, html);
+
   const onStatus = window.api.onStatus((msg) => {
-    if (aiBubble) aiBubble.innerHTML = escapeHtml(msg);
+    if (aiBubble) aiBubble.querySelector('.msg-bubble').textContent = msg;
   });
 
   const onChunk = window.api.onChunk((chunk) => {
     raw += chunk;
     tokenCount++;
     if (aiBubble) {
-      aiBubble.innerHTML = `Writing... (${tokenCount} tokens)`;
+      aiBubble.querySelector('.msg-bubble').innerHTML = S.thinkMode
+        ? `Analyzing &amp; writing... (${tokenCount} tokens)`
+        : `Writing... (${tokenCount} tokens)`;
     }
   });
 
-  const onDone = window.api.onDone((finalRaw) => {
+  const onDone = window.api.onDone((result) => {
     cleanupStream();
-    const finalHtml = extractHtml(finalRaw || raw);
-    applyHtmlToEditor(finalHtml);
-    refreshPreview(finalHtml);
-    addHistory(instruction, finalHtml);
-
-    const before = S.lastHtmlBeforeAI.split('\n');
-    const after  = finalHtml.split('\n');
-    const added   = Math.max(0, after.length - before.length);
-    const removed = Math.max(0, before.length - after.length);
-    if (aiBubble) {
-      aiBubble.classList.remove('streaming');
-      aiBubble.innerHTML = `\u2713 Applied \u2014 +${added} lines added, -${removed} removed`;
-    }
     S.isStreaming = false;
     setSendBusy(false);
+
+    const finalRaw  = (result && result.html) ? result.html : raw;
+    const resultHTML = extractHtml(finalRaw);
+
+    // 4. Validate HTML
+    if (S.validateMode) {
+      const validation = validateHTML(resultHTML);
+      if (!validation.valid) {
+        if (aiBubble) {
+          aiBubble.classList.remove('streaming');
+          const bubble = aiBubble.querySelector('.msg-bubble');
+          if (bubble) {
+            bubble.className = 'msg-bubble validation-err';
+            bubble.innerHTML = `⚠ Invalid HTML rejected<br><small>${escapeHtml(validation.error)}</small>`;
+          }
+        }
+        showToast('AI returned invalid HTML — change not applied', 'err');
+        return;
+      }
+    }
+
+    // 5. Detect think block
+    let displayMsg = '';
+    const thinkMatch = resultHTML.match(/<!--\s*THINK:([\s\S]*?)-->/i);
+    if (thinkMatch) {
+      displayMsg = `<div class="think-block">🧠 ${escapeHtml(thinkMatch[1].trim())}</div>`;
+    }
+
+    // 6. Count changes
+    const oldLines = html.split('\n').length;
+    const newLines = resultHTML.split('\n').length;
+    const delta    = newLines - oldLines;
+    const deltaStr = delta >= 0 ? `+${delta}` : `${delta}`;
+    const editMatches = (resultHTML.match(/DIPHORIA-EDIT:/g) || []).length;
+    const editNote = editMatches > 0
+      ? ` · ${editMatches} section${editMatches > 1 ? 's' : ''} edited`
+      : '';
+
+    displayMsg += `✓ Applied — ${deltaStr} lines${editNote}`;
+    if (S.pendingImageBase64) displayMsg += ' · used image reference';
+
+    if (aiBubble) {
+      aiBubble.classList.remove('streaming');
+      aiBubble.querySelector('.msg-bubble').innerHTML =
+        `<div class="msg-bubble">${displayMsg}</div>`;
+    }
+
+    // 7. Apply to editor
+    addHistory(instruction, resultHTML);
+    applyHtmlToEditor(resultHTML);
+    refreshPreview(resultHTML);
+    showToast('Changes applied by Diphoria AI', 'ok');
   });
 
   const onError = window.api.onError((err) => {
     cleanupStream();
-    if (aiBubble) {
-      aiBubble.classList.remove('streaming');
-      aiBubble.classList.add('error');
-      aiBubble.innerHTML = `Error: ${escapeHtml(String(err))}`;
-    }
     S.isStreaming = false;
     setSendBusy(false);
+    if (aiBubble) {
+      aiBubble.classList.remove('streaming');
+      const bubble = aiBubble.querySelector('.msg-bubble');
+      if (bubble) {
+        bubble.className = 'msg-bubble validation-err';
+        bubble.textContent = '✗ ' + err;
+      }
+    }
+    showToast(err, 'err');
   });
 
-  S.streamCleanup.push(onStatus, onChunk, onDone, onError);
+  S.streamCleanup = [onStatus, onChunk, onDone, onError];
 
-  try {
-    await window.api.aiStreamStart({ html, instruction, model, ollamaHost });
-  } catch (e) {
-    cleanupStream();
-    if (aiBubble) {
-      aiBubble.classList.remove('streaming');
-      aiBubble.classList.add('error');
-      aiBubble.innerHTML = `Error: ${escapeHtml(String(e))}`;
-    }
-    S.isStreaming = false;
-    setSendBusy(false);
-  }
+  window.api.aiStreamStart({
+    html,
+    instruction,
+    model,
+    ollamaHost,
+    systemPrompt,
+    imageBase64: S.pendingImageBase64 || null,
+  });
 }
 
 function setSendBusy(busy) {
@@ -368,6 +641,11 @@ const COMMANDS = [
   { icon: '\uD83E\uDD16', label: 'AI: Clean code',     hint: 'Format and clean up',          ai: true, cmd: 'clean and format the code with consistent indentation' },
   { icon: '\uD83E\uDD16', label: 'AI: Add animations', hint: 'Smooth CSS animations',        ai: true, cmd: 'add smooth CSS animations and transitions' },
   { icon: '\uD83E\uDD16', label: 'AI: Fix layout',     hint: 'Fix spacing and alignment',    ai: true, cmd: 'fix the layout, spacing, and alignment issues' },
+  { icon: '🛡',  label: 'Toggle Safe Mode',       hint: 'AI edits only targeted section', action: () => toggleSafeMode() },
+  { icon: '🧠',  label: 'Toggle Think Mode',      hint: 'AI analyzes before editing',     action: () => toggleThinkMode() },
+  { icon: '📚',  label: 'Clear Learning Data',    hint: 'Reset AI memory',                action: () => clearLearning() },
+  { icon: '📂',  label: 'Upload HTML File',       hint: 'Load HTML from file picker',     action: () => { const el = $('html-file-input'); if (el) el.click(); } },
+  { icon: '🖼',  label: 'Upload Reference Image', hint: 'AI uses as design reference',    action: () => { const el = $('image-file-input'); if (el) el.click(); } },
 ];
 
 function openPalette() {
@@ -600,75 +878,63 @@ function toggleDiff() {
 
 // ─── Monaco Initialization ────────────────────────────────────────────────────
 function initMonaco() {
-  require(['vs/editor/editor.main'], (monaco) => {
-    window.monaco = monaco;
+  const editorContainer = $('monaco-editor') || $('editor-container') || $('editor');
+  if (!editorContainer || editorContainer.tagName === 'TEXTAREA') {
+    console.warn('Monaco container not found or is a textarea');
+  }
 
-    const editorContainer = $('monaco-editor') || $('editor-container') || $('editor');
-    if (!editorContainer || editorContainer.tagName === 'TEXTAREA') {
-      // Fallback: look for a dedicated container div
-      console.warn('Monaco container not found or is a textarea');
-    }
+  const target = $('monaco-editor') || $('editor-container') || (() => {
+    const div = document.createElement('div');
+    div.id = 'monaco-editor';
+    div.style.cssText = 'width:100%;height:100%;';
+    const area = $('editor');
+    if (area && area.parentElement) { area.parentElement.replaceChild(div, area); }
+    return div;
+  })();
 
-    const target = $('monaco-editor') || $('editor-container') || (() => {
-      const div = document.createElement('div');
-      div.id = 'monaco-editor';
-      div.style.cssText = 'width:100%;height:100%;';
-      const area = $('editor');
-      if (area && area.parentElement) { area.parentElement.replaceChild(div, area); }
-      return div;
-    })();
-
-    const editor = monaco.editor.create(target, {
-      value:          '',
-      language:       'html',
-      theme:          'vs-dark',
-      fontSize:       S.settings.fontSize,
-      wordWrap:       S.settings.wordWrap,
-      minimap:        { enabled: !!S.settings.minimap },
-      formatOnPaste:  true,
-      autoIndent:     'full',
-      scrollBeyondLastLine: false,
-      tabSize:        2,
-      automaticLayout: true,
-    });
-
-    window._monacoEditor = editor;
-
-    // Cursor position → #line-info
-    editor.onDidChangeCursorPosition((e) => {
-      const info = $('line-info');
-      if (info) info.textContent = `Ln ${e.position.lineNumber}, Col ${e.position.column}`;
-    });
-
-    // Content change → debounced preview + char count
-    editor.onDidChangeModelContent(() => {
-      const cc = $('char-count');
-      if (cc) cc.textContent = editor.getValue().length.toLocaleString() + ' chars';
-      schedulePreview();
-    });
-
-    // Wire settings save
-    const saveBtn = $('btn-save-settings') || $('settings-save');
-    if (saveBtn) {
-      saveBtn.addEventListener('click', () => {
-        readSettingsFromForm();
-        saveSettings();
-        applySettingsToMonaco(editor);
-        showToast('Settings saved', 'ok');
-        const panel = $('settings-overlay') || $('settings-panel');
-        if (panel) panel.classList.add('hidden');
-      });
-    }
-
-    // Load history and check Ollama after Monaco is ready
-    loadHistoryData();
-    checkOllama();
-    setInterval(checkOllama, 30000);
-
-    wireEvents();
-    refreshPreview();
-    showWelcome();
+  const editor = window.monaco.editor.create(target, {
+    value:               '',
+    language:            'html',
+    theme:               'vs-dark',
+    fontSize:            S.settings.fontSize,
+    wordWrap:            S.settings.wordWrap,
+    minimap:             { enabled: !!S.settings.minimap },
+    formatOnPaste:       true,
+    autoIndent:          'full',
+    scrollBeyondLastLine: false,
+    tabSize:             2,
+    automaticLayout:     true,
   });
+
+  window._monacoEditor = editor;
+
+  // Cursor position → #line-info
+  editor.onDidChangeCursorPosition((e) => {
+    const info = $('line-info');
+    if (info) info.textContent = `Ln ${e.position.lineNumber}, Col ${e.position.column}`;
+  });
+
+  // Content change → debounced preview + char count
+  editor.onDidChangeModelContent(() => {
+    const cc = $('char-count');
+    if (cc) cc.textContent = editor.getValue().length.toLocaleString() + ' chars';
+    schedulePreview();
+  });
+
+  // Wire settings save
+  const saveBtn = $('btn-save-settings') || $('settings-save');
+  if (saveBtn) {
+    saveBtn.addEventListener('click', () => {
+      readSettingsFromForm();
+      saveSettings();
+      applySettingsToMonaco(editor);
+      showToast('Settings saved', 'ok');
+      const panel = $('settings-overlay') || $('settings-panel');
+      if (panel) panel.classList.add('hidden');
+    });
+  }
+
+  refreshPreview();
 }
 
 // ─── Welcome state ────────────────────────────────────────────────────────────
@@ -774,6 +1040,58 @@ function wireEvents() {
     settingsOverlay.addEventListener('click', (e) => { if (e.target === settingsOverlay) settingsOverlay.classList.add('hidden'); });
   }
 
+  // Upload HTML file
+  const htmlInput = $('html-file-input');
+  if (htmlInput) htmlInput.addEventListener('change', (e) => {
+    if (e.target.files[0]) handleHtmlUpload(e.target.files[0]);
+    htmlInput.value = '';
+  });
+  const btnUpload = $('btn-upload');
+  if (btnUpload) btnUpload.addEventListener('click', () => {
+    const el = $('html-file-input');
+    if (el) el.click();
+  });
+
+  // Image upload
+  const imgInput = $('image-file-input');
+  if (imgInput) imgInput.addEventListener('change', (e) => {
+    if (e.target.files[0]) handleImageUpload(e.target.files[0]);
+    imgInput.value = '';
+  });
+  const btnImg = $('btn-image-upload');
+  if (btnImg) btnImg.addEventListener('click', () => {
+    const el = $('image-file-input');
+    if (el) el.click();
+  });
+  const btnRmImg = $('btn-remove-image');
+  if (btnRmImg) btnRmImg.addEventListener('click', removeImage);
+
+  // Safe / Think mode toggles
+  const btnSafe = $('btn-safe-mode');
+  if (btnSafe) btnSafe.addEventListener('click', toggleSafeMode);
+  const btnThink = $('btn-think-mode');
+  if (btnThink) btnThink.addEventListener('click', toggleThinkMode);
+
+  // Drag-and-drop on editor panel
+  const edPanel = $('ed-panel');
+  if (edPanel) {
+    edPanel.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      edPanel.style.outline = '2px dashed var(--accent)';
+    });
+    edPanel.addEventListener('dragleave', () => {
+      edPanel.style.outline = '';
+    });
+    edPanel.addEventListener('drop', (e) => {
+      e.preventDefault();
+      edPanel.style.outline = '';
+      const file = e.dataTransfer.files[0];
+      if (!file) return;
+      if (file.name.match(/\.html?$/i)) handleHtmlUpload(file);
+      else if (file.type.startsWith('image/')) handleImageUpload(file);
+    });
+  }
+
   // Global keyboard shortcuts
   document.addEventListener('keydown', (e) => {
     const mod = e.metaKey || e.ctrlKey;
@@ -790,5 +1108,32 @@ function wireEvents() {
 // ─── Boot ─────────────────────────────────────────────────────────────────────
 (function boot() {
   loadSettings();
-  initMonaco();
+
+  S.safeMode     = S.settings.safeMode     !== false;
+  S.thinkMode    = !!S.settings.thinkMode;
+  S.learningMode = S.settings.learningMode !== false;
+  S.validateMode = S.settings.validateMode !== false;
+
+  // Update mode badges
+  const safeBadge = $('btn-safe-mode');
+  if (safeBadge) {
+    safeBadge.className = 'mode-badge ' + (S.safeMode ? 'safe-on' : 'safe-off');
+    safeBadge.title = S.safeMode ? 'Safe Mode ON — click to disable' : 'Safe Mode OFF — click to enable';
+  }
+  const thinkBadge = $('btn-think-mode');
+  if (thinkBadge) thinkBadge.className = 'mode-badge ' + (S.thinkMode ? 'think-on' : 'think-off');
+
+  // Update learn badge
+  if (S.learningMode) updateLearnBadge(loadLearning());
+
+  require(['vs/editor/editor.main'], (monaco) => {
+    window.monaco = monaco;
+    initMonaco();
+    loadHistoryData().then(() => {
+      wireEvents();
+      checkOllama();
+      setInterval(checkOllama, 30000);
+      showWelcome();
+    });
+  });
 })();
