@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta http-equiv="Content-Security-Policy"
     content="default-src 'self' 'unsafe-inline' 'unsafe-eval' file: data:; connect-src http://localhost:11434; img-src * data: blob:; worker-src blob: file:;">
-  <title>HTML AI Studio</title>
+  <title>Diphoria AI</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -13,13 +13,8 @@
 <header class="topbar" id="topbar">
   <div class="tb-left">
     <div class="logo">
-      <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
-        <rect x="2"  y="2"  width="8" height="8" rx="2" fill="#7c3aed"/>
-        <rect x="12" y="2"  width="8" height="8" rx="2" fill="#7c3aed" opacity=".45"/>
-        <rect x="2"  y="12" width="8" height="8" rx="2" fill="#7c3aed" opacity=".45"/>
-        <rect x="12" y="12" width="8" height="8" rx="2" fill="#7c3aed"/>
-      </svg>
-      <span class="logo-text">HTML AI Studio</span>
+      <svg width="22" height="22" viewBox="0 0 22 22" fill="none"><path d="M4 3h6c4.5 0 8 3.5 8 8s-3.5 8-8 8H4V3z" fill="#7c3aed"/><path d="M8 7h2c2.2 0 4 1.8 4 4s-1.8 4-4 4H8V7z" fill="#0a0a0f"/></svg>
+      <span class="logo-text">Diphoria AI</span>
     </div>
     <div class="tb-sep"></div>
     <button class="tb-btn" id="btn-open">
@@ -29,6 +24,12 @@
     <button class="tb-btn" id="btn-save">
       <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><path d="M2.5 1A1.5 1.5 0 001 2.5v9A1.5 1.5 0 002.5 13h9a1.5 1.5 0 001.5-1.5V4a.5.5 0 00-.146-.354l-3-3A.5.5 0 009.5 0.5H2.5zM9 1.5V4h2.793L9 1.707V1.5zM4 8.5h6v1H4v-1zm0-2h6v1H4v-1z"/></svg>
       Save
+    </button>
+    <!-- Upload HTML file (hidden input) -->
+    <input type="file" id="html-file-input" accept=".html,.htm" style="display:none">
+    <button class="tb-btn" id="btn-upload" title="Upload HTML file">
+      <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><path d="M7 1a.5.5 0 01.5.5v7.793l2.146-2.147a.5.5 0 01.708.708l-3 3a.5.5 0 01-.708 0l-3-3a.5.5 0 01.708-.708L6.5 9.293V1.5A.5.5 0 017 1zM1 13.5a.5.5 0 01.5-.5h11a.5.5 0 010 1h-11a.5.5 0 01-.5-.5z"/></svg>
+      Upload
     </button>
     <span class="filename" id="filename"></span>
   </div>
@@ -63,6 +64,15 @@
       <span id="status-label">Checking...</span>
     </div>
 
+    <div class="tb-sep"></div>
+    <!-- Safe Mode toggle badge -->
+    <button class="mode-badge safe-on" id="btn-safe-mode" title="Safe Edit Mode — AI modifies only targeted sections">
+      🛡 Safe
+    </button>
+    <!-- Think Mode toggle -->
+    <button class="mode-badge think-off" id="btn-think-mode" title="Think Mode — AI analyzes before editing">
+      🧠 Think
+    </button>
     <div class="tb-sep"></div>
     <button class="tb-btn tb-icon-btn" id="btn-settings" title="Settings">
       <svg width="15" height="15" viewBox="0 0 15 15" fill="currentColor"><path d="M7.5 5.5a2 2 0 100 4 2 2 0 000-4zm-3.5 2a3.5 3.5 0 117 0 3.5 3.5 0 01-7 0zM6.56.44a.5.5 0 01.88 0l.77 1.54a5.5 5.5 0 011.2.5l1.65-.55a.5.5 0 01.54.18l1 1.73a.5.5 0 01-.08.62l-1.2 1.08a5.5 5.5 0 010 1.4l1.2 1.08a.5.5 0 01.08.62l-1 1.73a.5.5 0 01-.54.18l-1.65-.55a5.5 5.5 0 01-1.2.5l-.77 1.54a.5.5 0 01-.88 0l-.77-1.54a5.5 5.5 0 01-1.2-.5l-1.65.55a.5.5 0 01-.54-.18l-1-1.73a.5.5 0 01.08-.62l1.2-1.08a5.5 5.5 0 010-1.4L1.42 4.54a.5.5 0 01-.08-.62l1-1.73a.5.5 0 01.54-.18l1.65.55a5.5 5.5 0 011.2-.5L6.56.44z"/></svg>
@@ -142,13 +152,15 @@
   <div class="ai-panel-header" id="ai-panel-toggle">
     <div class="ai-panel-title">
       <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><path d="M7 0C3.134 0 0 3.134 0 7s3.134 7 7 7 7-3.134 7-7S10.866 0 7 0zm.75 10.5h-1.5V6.25h1.5v4.25zm0-5.75h-1.5v-1.5h1.5v1.5z"/></svg>
-      AI Assistant
+      Diphoria AI
     </div>
     <div class="ai-panel-meta">
       <span class="ai-thinking-badge hidden" id="ai-thinking-badge">
         <span class="think-dot"></span><span class="think-dot"></span><span class="think-dot"></span>
         thinking
       </span>
+      <!-- Learning mode indicator -->
+      <span class="learn-badge" id="learn-badge" title="Learning from your instructions">📚 Learning</span>
       <button class="panel-collapse-btn" id="btn-collapse-ai" title="Toggle panel">
         <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" id="collapse-icon">
           <path d="M2 4l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
@@ -169,19 +181,31 @@
           </svg>
         </div>
         <div class="welcome-text">
-          <strong>Senior Dev AI — Powered by Ollama (100% local, no API key)</strong>
+          <strong>Diphoria AI — Smart HTML Assistant (Local, No API Key)</strong>
           <p>Give instructions in <em>English or Hindi</em>. I edit your HTML like a 10+ year developer.</p>
           <div class="example-chips">
             <span class="chip" data-cmd="make it mobile responsive">make it mobile responsive</span>
-            <span class="chip" data-cmd="add a smooth dark mode">add smooth dark mode</span>
-            <span class="chip" data-cmd="header ko neon purple karo">header ko neon purple karo</span>
-            <span class="chip" data-cmd="add CSS animations to buttons">add CSS animations to buttons</span>
-            <span class="chip" data-cmd="navigation fix karo aur sticky banao">navigation fix karo sticky banao</span>
-            <span class="chip" data-cmd="clean and format the code">clean &amp; format code</span>
+            <span class="chip" data-cmd="add smooth dark mode">add smooth dark mode</span>
+            <span class="chip" data-cmd="header ko neon banao">header ko neon banao</span>
+            <span class="chip" data-cmd="add CSS animations">add CSS animations</span>
+            <span class="chip" data-cmd="navigation sticky karo">navigation sticky karo</span>
+            <span class="chip" data-cmd="clean &amp; format code">clean &amp; format code</span>
+            <span class="chip" data-cmd="fix layout issues">fix layout issues</span>
+            <span class="chip" data-cmd="button hover effects">button hover effects</span>
           </div>
         </div>
       </div>
     </div>
+  </div>
+
+  <!-- Image preview strip (hidden until image loaded) -->
+  <div class="img-preview-strip hidden" id="img-preview-strip">
+    <img id="img-preview-thumb" src="" alt="Reference image">
+    <div class="img-preview-info">
+      <span id="img-preview-name">image.png</span>
+      <span class="img-preview-hint">AI will use as design reference</span>
+    </div>
+    <button class="img-preview-remove" id="btn-remove-image" title="Remove image">✕</button>
   </div>
 
   <div class="chat-input-bar">
@@ -197,6 +221,11 @@
       ></textarea>
     </div>
     <div class="chat-actions">
+      <!-- Image upload -->
+      <input type="file" id="image-file-input" accept="image/png,image/jpeg,image/gif,image/webp" style="display:none">
+      <button class="tb-btn tb-icon-btn img-upload-btn" id="btn-image-upload" title="Upload reference image for AI">
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><path d="M1.5 2A1.5 1.5 0 000 3.5v7A1.5 1.5 0 001.5 12h11A1.5 1.5 0 0014 10.5v-7A1.5 1.5 0 0012.5 2h-11zm5 2.5a1.5 1.5 0 110 3 1.5 1.5 0 010-3zM2 9.5l3-3 2 2 2-2.5 3 3.5H2z"/></svg>
+      </button>
       <select class="model-select" id="model-select" title="Select Ollama model">
         <option value="llama3.1:8b">llama3.1:8b</option>
         <option value="qwen2.5-coder:7b" selected>qwen2.5-coder:7b</option>
@@ -270,6 +299,38 @@
       </div>
 
       <div class="settings-section">
+        <div class="settings-section-title">AI Behaviour</div>
+        <div class="setting-row">
+          <label>Safe Edit Mode</label>
+          <select id="s-safe-mode">
+            <option value="true" selected>ON — modify only targeted section</option>
+            <option value="false">OFF — allow full HTML rewrite</option>
+          </select>
+        </div>
+        <div class="setting-row">
+          <label>Think Mode</label>
+          <select id="s-think-mode">
+            <option value="false" selected>OFF — apply changes directly</option>
+            <option value="true">ON — AI analyzes before editing</option>
+          </select>
+        </div>
+        <div class="setting-row">
+          <label>Learning Mode</label>
+          <select id="s-learning-mode">
+            <option value="true" selected>ON — remember last 10 instructions</option>
+            <option value="false">OFF — no memory</option>
+          </select>
+        </div>
+        <div class="setting-row">
+          <label>Validation</label>
+          <select id="s-validate">
+            <option value="true" selected>ON — reject invalid HTML from AI</option>
+            <option value="false">OFF — apply AI output without checking</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="settings-section">
         <div class="settings-section-title">Cloud API (Optional fallback)</div>
         <div class="setting-row">
           <label>Provider</label>
@@ -318,6 +379,23 @@
     <div class="modal-foot">
       <span class="saved-msg hidden" id="saved-msg">Saved ✓</span>
       <button class="save-btn" id="btn-save-settings">Save Settings</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════ CONFIRM MODAL ═══════════════════════════════════════ -->
+<div class="modal-overlay hidden" id="confirm-overlay">
+  <div class="modal-box confirm-box" role="dialog">
+    <div class="modal-head">
+      <h2 id="confirm-title">Confirm Change</h2>
+    </div>
+    <div class="modal-body">
+      <p id="confirm-message">This change will significantly modify the HTML structure. Proceed?</p>
+      <div class="confirm-preview" id="confirm-preview"></div>
+    </div>
+    <div class="modal-foot confirm-foot">
+      <button class="pill-btn" id="confirm-cancel">Cancel</button>
+      <button class="save-btn" id="confirm-ok">Apply Anyway</button>
     </div>
   </div>
 </div>

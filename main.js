@@ -27,7 +27,7 @@ function createWindow() {
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'))
   mainWindow.once('ready-to-show', () => mainWindow.show())
 
-  historyFilePath = path.join(app.getPath('userData'), 'html-ai-studio-history.json')
+  historyFilePath = path.join(app.getPath('userData'), 'diphoria-ai-history.json')
 }
 
 app.whenReady().then(createWindow)
@@ -65,31 +65,24 @@ ipcMain.handle('ollama-models', async () => {
 })
 
 // ─── Ollama streaming inference ───────────────────────────────────────────────
-ipcMain.on('ai-stream-start', async (event, { html, instruction, model, ollamaHost }) => {
+const DEFAULT_SYSTEM = `You are a world-class senior HTML/CSS/JavaScript developer with 10+ years of experience.
+You are an expert in modern web design, responsive layouts, animations, accessibility, and performance.
+You understand instructions in BOTH English and Hindi fluently.
+Return ONLY the complete updated HTML — no explanations, no markdown fences.`
+
+ipcMain.on('ai-stream-start', async (event, { html, instruction, model, ollamaHost, systemPrompt, imageBase64 }) => {
   const wc   = event.sender
   const host = ollamaHost || 'localhost'
   const port = 11434
 
-  const SYSTEM = `You are a world-class senior HTML/CSS/JavaScript developer with 10+ years of experience.
-You are an expert in modern web design, responsive layouts, animations, accessibility, and performance.
-You understand instructions in BOTH English and Hindi fluently.
+  const SYSTEM = systemPrompt || DEFAULT_SYSTEM
 
-When you receive an HTML document and an instruction:
-1. Think about what a senior developer would actually do — not just the literal request
-2. Apply the change with professional quality (clean code, modern CSS, best practices)
-3. Return ONLY the complete updated HTML file — nothing else
-   - No explanations
-   - No markdown code fences
-   - No commentary before or after
-   - Just the raw complete HTML from <!DOCTYPE html> to </html>
-
-Quality standards:
-- Dark mode → polished variables-based theme, not just black backgrounds
-- Mobile responsive → proper breakpoints, touch targets, fluid layouts
-- Animations → smooth, purposeful, GPU-accelerated CSS transitions
-- Colors → harmonious palettes, proper contrast ratios
-- Clean code → consistent 2-space indentation, logical structure
-- Always preserve ALL content unless explicitly told to remove something`
+  // Build user message — support vision models (llava, etc.) with imageBase64
+  const userMessage = { role: 'user', content: `INSTRUCTION: ${instruction}\n\nHTML:\n${html}` }
+  if (imageBase64) {
+    const b64 = imageBase64.replace(/^data:image\/\w+;base64,/, '')
+    userMessage.images = [b64]
+  }
 
   const body = JSON.stringify({
     model,
@@ -97,7 +90,7 @@ Quality standards:
     options: { temperature: 0.1, num_ctx: 16384, num_predict: 8192 },
     messages: [
       { role: 'system', content: SYSTEM },
-      { role: 'user',   content: `INSTRUCTION: ${instruction}\n\nHTML:\n${html}` }
+      userMessage
     ]
   })
 

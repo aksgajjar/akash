@@ -360,3 +360,99 @@ kbd { background: var(--surface4); border: 1px solid var(--border2); border-radi
 
 /* ── Utilities ────────────────────────────────────────────────────────────── */
 .hidden { display: none !important; }
+
+/* ── Diphoria AI — New Feature Styles ────────────────────────────────────── */
+
+/* Safe Mode / Think Mode badge buttons in topbar */
+.mode-badge {
+  display: flex; align-items: center; gap: 4px;
+  padding: 3px 9px; border-radius: 20px; font-size: 11px;
+  font-weight: 600; font-family: inherit; cursor: pointer;
+  border: 1px solid transparent; transition: all .2s; white-space: nowrap;
+  -webkit-app-region: no-drag;
+}
+.mode-badge.safe-on  { background: rgba(16,185,129,.15); border-color: rgba(16,185,129,.4); color: #10b981; }
+.mode-badge.safe-off { background: var(--surface2); border-color: var(--border); color: var(--text3); }
+.mode-badge.think-on  { background: rgba(124,58,237,.15); border-color: rgba(124,58,237,.4); color: #a78bfa; }
+.mode-badge.think-off { background: var(--surface2); border-color: var(--border); color: var(--text3); }
+
+/* Learning badge in AI panel header */
+.learn-badge {
+  font-size: 10.5px; color: var(--text3); padding: 2px 7px;
+  background: var(--surface3); border: 1px solid var(--border);
+  border-radius: 10px; transition: all .2s;
+}
+.learn-badge.active { color: #fbbf24; border-color: rgba(251,191,36,.3); background: rgba(251,191,36,.08); }
+
+/* Image preview strip */
+.img-preview-strip {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 14px; background: var(--surface2);
+  border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.img-preview-strip img {
+  width: 48px; height: 36px; object-fit: cover;
+  border-radius: 4px; border: 1px solid var(--border2);
+}
+.img-preview-info { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.img-preview-info span { font-size: 11.5px; color: var(--text2); }
+.img-preview-hint { color: var(--text3) !important; font-size: 10.5px !important; }
+.img-preview-remove {
+  background: none; border: none; color: var(--text3); cursor: pointer;
+  padding: 4px 6px; border-radius: 4px; font-size: 13px; transition: color .15s;
+}
+.img-preview-remove:hover { color: var(--red); }
+
+/* Image upload button */
+.img-upload-btn { color: var(--text3); }
+.img-upload-btn.has-image { color: #fbbf24; }
+
+/* Confirm modal */
+.confirm-box { max-width: 420px; }
+.confirm-foot { justify-content: flex-end; gap: 10px; }
+.confirm-preview {
+  margin-top: 10px; padding: 10px; background: var(--bg);
+  border: 1px solid var(--border); border-radius: 6px;
+  font-size: 11.5px; color: var(--text3); font-family: monospace;
+  max-height: 120px; overflow: auto;
+}
+.confirm-preview:empty { display: none; }
+
+/* Validation error in chat */
+.msg-bubble.validation-err {
+  background: rgba(244,63,94,.1);
+  border-color: rgba(244,63,94,.3);
+  color: var(--red);
+}
+
+/* Chat bubble system messages */
+.chat-bubble { display: flex; gap: 8px; animation: msg-in .2s ease; margin-bottom: 4px; }
+.chat-bubble.user { justify-content: flex-end; }
+.chat-bubble.ai   { justify-content: flex-start; }
+.msg-bubble {
+  max-width: 80%; padding: 8px 12px; border-radius: 10px;
+  font-size: 12.5px; line-height: 1.55; word-break: break-word;
+  border: 1px solid transparent;
+}
+.chat-bubble.user .msg-bubble { background: var(--accent); color: #fff; border-bottom-right-radius: 3px; }
+.chat-bubble.ai   .msg-bubble { background: var(--surface2); border-color: var(--border); color: var(--text); border-bottom-left-radius: 3px; }
+.chat-bubble.streaming .msg-bubble::after { content: '▋'; animation: blink .7s infinite; margin-left: 2px; }
+.msg-stats { margin-top: 6px; padding-top: 6px; border-top: 1px solid rgba(255,255,255,.1); font-size: 11px; opacity: .7; }
+.chat-bubble.ai .msg-stats { border-color: var(--border); }
+
+/* Safe mode warning in chat */
+.safe-warn {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 10px; background: rgba(251,191,36,.08);
+  border: 1px solid rgba(251,191,36,.2); border-radius: 6px;
+  font-size: 11.5px; color: #fbbf24; margin-bottom: 4px;
+}
+
+/* Think mode analysis block */
+.think-block {
+  padding: 8px 10px; background: rgba(124,58,237,.06);
+  border-left: 2px solid var(--accent); border-radius: 4px;
+  font-size: 11.5px; color: var(--text2); margin-bottom: 6px;
+  font-style: italic;
+}
