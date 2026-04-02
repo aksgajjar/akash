@@ -4,14 +4,11 @@
 const STORAGE_KEY = 'diphoria-ai-v1';
 
 const defaults = {
-  ollamaHost:    '127.0.0.1',
-  defaultModel:  'llama3.2:3b',   // fastest/lightest; user can switch to 7b in settings
   historyLimit:  25,
   provider:      'none',
   apiKey:        '',
   fontSize:      13,
   wordWrap:      'on',
-  minimap:       false,
   safeMode:      true,
   thinkMode:     false,
   learningMode:  true,
@@ -71,40 +68,32 @@ function saveSettings() {
 
 function applySettingsToForm() {
   const map = {
-    's-ollama-host':    'ollamaHost',
-    's-default-model':  'defaultModel',
-    's-history-limit':  'historyLimit',
-    's-provider':       'provider',
-    's-api-key':        'apiKey',
-    's-font-size':      'fontSize',
-    's-word-wrap':      'wordWrap',
+    's-history-limit': 'historyLimit',
+    's-provider':      'provider',
+    's-apikey':        'apiKey',
+    's-font-size':     'fontSize',
+    's-word-wrap':     'wordWrap',
   };
   for (const [id, key] of Object.entries(map)) {
     const el = $(id);
     if (el) el.value = String(S.settings[key]);
   }
-  const minimap = $('s-minimap');
-  if (minimap) minimap.checked = !!S.settings.minimap;
 }
 
 function readSettingsFromForm() {
-  S.settings.ollamaHost   = $('s-ollama-host')  ? $('s-ollama-host').value.trim()   : S.settings.ollamaHost;
-  S.settings.defaultModel = $('s-default-model') ? $('s-default-model').value.trim() : S.settings.defaultModel;
   S.settings.historyLimit = $('s-history-limit') ? parseInt($('s-history-limit').value, 10) || 25 : 25;
-  S.settings.provider     = $('s-provider')     ? $('s-provider').value             : S.settings.provider;
-  S.settings.apiKey       = $('s-api-key')      ? $('s-api-key').value.trim()       : S.settings.apiKey;
-  S.settings.fontSize     = $('s-font-size')    ? parseInt($('s-font-size').value, 10) || 13 : 13;
-  S.settings.wordWrap     = $('s-word-wrap')    ? $('s-word-wrap').value             : S.settings.wordWrap;
-  S.settings.minimap      = $('s-minimap')      ? $('s-minimap').checked             : false;
+  S.settings.provider     = $('s-provider')      ? $('s-provider').value              : S.settings.provider;
+  S.settings.apiKey       = $('s-apikey')        ? $('s-apikey').value.trim()          : S.settings.apiKey;
+  S.settings.fontSize     = $('s-font-size')     ? parseInt($('s-font-size').value, 10) || 13 : 13;
+  S.settings.wordWrap     = $('s-word-wrap')     ? $('s-word-wrap').value              : S.settings.wordWrap;
 }
 
-function applySettingsToMonaco(editor) {
+function applySettingsToCM(editor) {
   if (!editor) return;
-  editor.updateOptions({
-    fontSize:  S.settings.fontSize,
-    wordWrap:  S.settings.wordWrap,
-    minimap:   { enabled: !!S.settings.minimap },
-  });
+  const fs = S.settings.fontSize || 13;
+  editor.getWrapperElement().style.fontSize = fs + 'px';
+  editor.setOption('lineWrapping', S.settings.wordWrap !== 'off');
+  editor.refresh();
 }
 
 // ─── Learning Mode ────────────────────────────────────────────────────────────
@@ -447,55 +436,110 @@ function spliceSnippetBack(fullHtml, snippet, mode) {
 }
 
 
-const BUILTIN_MODELS = ['qwen2.5-coder:7b', 'qwen2.5-coder:14b', 'codellama:7b', 'llama3.2:3b', 'mistral:7b'];
-
-async function checkOllama() {
+// ─── AI Engine status (node-llama-cpp) ───────────────────────────────────────
+async function checkModelStatus() {
   const dot   = $('status-dot');
   const label = $('status-label');
   try {
-    // ollamaCheck now returns { ok: bool, models: string[] } — never a plain bool
-    const result = await window.api.ollamaCheck();
-    const isOk   = result && result.ok === true;
-    console.log('[Diphoria] Ollama status:', result);
-    if (dot)   { dot.classList.toggle('ok', isOk); dot.classList.toggle('err', !isOk); }
-    if (label) label.textContent = isOk ? 'Ollama online' : 'Ollama offline';
-    if (isOk) {
-      // result.models already included — no second request needed
-      const modelNames = (result.models && result.models.length)
-        ? result.models
-        : (await window.api.ollamaModels().catch(() => ({ models: [] }))).models || [];
-      populateModelSelects(modelNames);
-    }
+    const s = await window.api.modelStatus();
+    const ok = s && s.loaded;
+    if (dot)   { dot.classList.toggle('ok', ok); dot.classList.toggle('err', !ok); }
+    if (label) label.textContent = ok ? 'AI Ready' : (s && s.exists ? 'Loading…' : 'No model');
   } catch (e) {
-    console.error('[Diphoria] checkOllama error:', e);
     if (dot)   { dot.classList.remove('ok'); dot.classList.add('err'); }
-    if (label) label.textContent = 'Ollama offline';
+    if (label) label.textContent = 'AI error';
   }
 }
 
-function populateModelSelects(models) {
-  const names  = [...new Set([...BUILTIN_MODELS, ...models.map((m) => (typeof m === 'string' ? m : m.name))])];
-  const targets = ['model-select', 's-default-model'];
-  for (const id of targets) {
-    const sel = $(id);
-    if (!sel) continue;
-    const current = sel.value || S.settings.defaultModel;
-    sel.innerHTML = '';
-    for (const n of names) {
-      const opt = document.createElement('option');
-      opt.value = n;
-      opt.textContent = n;
-      if (n === current) opt.selected = true;
-      sel.appendChild(opt);
+// ─── First-run model setup overlay ───────────────────────────────────────────
+async function initModelSetup() {
+  const overlay = $('model-setup-overlay');
+  if (!overlay) return;
+
+  const s = await window.api.modelStatus();
+  if (s && s.loaded) return;  // model already ready
+
+  // Populate model options
+  if (s && s.models) {
+    const container = $('model-options');
+    if (container) {
+      container.innerHTML = s.models.map((m, i) =>
+        `<label class="model-option ${i === 0 ? 'selected' : ''}">
+          <input type="radio" name="model-choice" value="${m.id}" ${i === 0 ? 'checked' : ''}>
+          <span class="model-option-label">${m.label}</span>
+          <span class="model-option-size">~${(m.sizeMB / 1000).toFixed(1)} GB</span>
+        </label>`
+      ).join('');
     }
   }
+
+  if (s && s.exists) {
+    // Model file present but not loaded — load it
+    setStatusLabel('Loading model…', false);
+    const r = await window.api.modelLoad();
+    if (r && r.ok) { checkModelStatus(); return; }
+  }
+
+  // Need download
+  overlay.classList.remove('hidden');
+
+  const cleanupDl = setupDownloadListeners(overlay);
+
+  const startBtn = $('btn-start-download');
+  if (startBtn) {
+    startBtn.addEventListener('click', () => {
+      const chosen = overlay.querySelector('input[name="model-choice"]:checked');
+      const modelId = chosen ? chosen.value : null;
+      window.api.modelDownload(modelId);
+      $('model-choose-step').classList.add('hidden');
+      $('model-progress-step').classList.remove('hidden');
+    }, { once: true });
+  }
+
+  const retryBtn = $('btn-retry-download');
+  if (retryBtn) {
+    retryBtn.addEventListener('click', () => {
+      $('model-error-step').classList.add('hidden');
+      $('model-choose-step').classList.remove('hidden');
+    });
+  }
+}
+
+function setupDownloadListeners(overlay) {
+  const c1 = window.api.onDownloadStart((d) => {
+    const h = $('dl-model-name'); if (h) h.textContent = 'Downloading: ' + (d.label || 'model');
+    const hint = $('dl-size-hint'); if (hint) hint.textContent = `~${(d.sizeMB/1000).toFixed(1)} GB — one-time download`;
+  });
+  const c2 = window.api.onDownloadProgress((d) => {
+    const bar = $('dl-bar'); if (bar) bar.style.width = d.pct + '%';
+    const pct = $('dl-pct'); if (pct) pct.textContent = d.pct + '%';
+    const bytes = $('dl-bytes'); if (bytes) bytes.textContent = `${d.downloadedMB} / ${d.totalMB} MB`;
+  });
+  const c3 = window.api.onDownloadError((err) => {
+    $('model-progress-step').classList.add('hidden');
+    $('model-error-step').classList.remove('hidden');
+    const msg = $('model-error-msg'); if (msg) msg.textContent = err;
+  });
+  const c4 = window.api.onModelReady(() => {
+    overlay.classList.add('hidden');
+    checkModelStatus();
+    showToast('AI model ready', 'ok');
+    [c1, c2, c3, c4].forEach(fn => { try { fn(); } catch {} });
+  });
+  return () => [c1, c2, c3, c4].forEach(fn => { try { fn(); } catch {} });
+}
+
+function setStatusLabel(text, ok) {
+  const dot = $('status-dot'); const label = $('status-label');
+  if (dot) { dot.classList.toggle('ok', ok); dot.classList.toggle('err', !ok); }
+  if (label) label.textContent = text;
 }
 
 // ─── Preview ──────────────────────────────────────────────────────────────────
 function refreshPreview(html) {
   const iframe = $('preview');
   const placeholder = $('pv-placeholder');
-  const content = html !== undefined ? html : (window._monacoEditor ? window._monacoEditor.getValue() : '');
+  const content = html !== undefined ? html : (window._cmEditor ? window._cmEditor.getValue() : '');
   if (!content.trim()) {
     if (placeholder) placeholder.style.display = '';
     if (iframe) iframe.srcdoc = '';
@@ -550,17 +594,13 @@ function cleanupStream() {
 async function sendMessage() {
   if (S.isStreaming) return;
   const input    = $('chat-input');
-  const modelSel = $('model-select');
   if (!input) return;
   const instruction = input.value.trim();
   if (!instruction) return;
 
-  const editor = window._monacoEditor;
+  const editor = window._cmEditor;
   const html = editor ? editor.getValue() : '';
   if (!html.trim()) { showToast('Paste some HTML first', 'err'); return; }
-
-  const model      = modelSel ? modelSel.value : S.settings.defaultModel;
-  const ollamaHost = S.settings.ollamaHost || '127.0.0.1';
 
   if (S.learningMode) addToLearning(instruction);
   autoBackup(html, instruction);
@@ -673,12 +713,9 @@ async function sendMessage() {
 
   // Send snippet (not full HTML) to AI
   window.api.aiStreamStart({
-    html: snippet,           // ← only the relevant section
+    html: snippet,      // only the relevant section
     instruction,
-    model,
-    ollamaHost,
-    systemPrompt,            // ← compact snippet-only prompt
-    imageBase64: S.pendingImageBase64 || null,
+    systemPrompt,       // compact snippet-only prompt
   });
 }
 
@@ -698,14 +735,9 @@ function extractHtml(raw) {
 }
 
 function applyHtmlToEditor(html) {
-  const editor = window._monacoEditor;
+  const editor = window._cmEditor;
   if (!editor) return;
-  const model = editor.getModel();
-  if (!model) { editor.setValue(html); return; }
-  const range = model.getFullModelRange();
-  editor.pushUndoStop();
-  model.pushEditOperations([], [{ range, text: html }], () => null);
-  editor.pushUndoStop();
+  editor.setValue(html);
 }
 
 // ─── Version History ──────────────────────────────────────────────────────────
@@ -878,7 +910,7 @@ async function openFile() {
 }
 
 async function saveFile() {
-  const editor = window._monacoEditor;
+  const editor = window._cmEditor;
   const html = editor ? editor.getValue() : '';
   if (!html.trim()) { showToast('Nothing to save', 'err'); return; }
   try {
@@ -896,14 +928,21 @@ async function saveFile() {
 }
 
 function formatCode() {
-  const editor = window._monacoEditor;
+  const editor = window._cmEditor;
   if (!editor) return;
-  const action = editor.getAction('editor.action.formatDocument');
-  if (action) action.run();
+  // Simple format: normalize 2-space indentation using DOMParser + serialization
+  const html = editor.getValue();
+  try {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, 'text/html');
+    // Use innerHTML indentation as a basic beautifier
+    const formatted = '<!DOCTYPE html>\n' + doc.documentElement.outerHTML;
+    editor.setValue(formatted);
+  } catch { /* keep as-is if parse fails */ }
 }
 
 function copyHTML() {
-  const editor = window._monacoEditor;
+  const editor = window._cmEditor;
   const html = editor ? editor.getValue() : '';
   if (!html) { showToast('Nothing to copy', 'err'); return; }
   navigator.clipboard.writeText(html).then(
@@ -913,7 +952,7 @@ function copyHTML() {
 }
 
 function clearEditor() {
-  const editor = window._monacoEditor;
+  const editor = window._cmEditor;
   if (!editor) return;
   applyHtmlToEditor('');
   refreshPreview('');
@@ -982,72 +1021,49 @@ function closeAllOverlays() {
   closePalette();
 }
 
-// ─── Diff View ────────────────────────────────────────────────────────────────
-let diffEditor = null;
-let diffVisible = false;
-
+// ─── Diff — simple char-count delta (no Monaco diff editor needed) ───────────
 function toggleDiff() {
-  const container = $('diff-overlay') || $('diff-container');
-  if (!container) return;
-  diffVisible = !diffVisible;
-  container.classList.toggle('hidden', !diffVisible);
-  if (diffVisible && window.monaco) {
-    const before = S.lastHtmlBeforeAI;
-    const after  = window._monacoEditor ? window._monacoEditor.getValue() : '';
-    if (!diffEditor) {
-      diffEditor = window.monaco.editor.createDiffEditor(container, {
-        readOnly:       true,
-        renderSideBySide: true,
-        theme:          'vs-dark',
-      });
-    }
-    diffEditor.setModel({
-      original: window.monaco.editor.createModel(before, 'html'),
-      modified: window.monaco.editor.createModel(after,  'html'),
-    });
-  }
+  const before = S.lastHtmlBeforeAI || '';
+  const after  = window._cmEditor ? window._cmEditor.getValue() : '';
+  if (!before) { showToast('No pre-edit snapshot yet', ''); return; }
+  const delta = after.length - before.length;
+  const sign  = delta >= 0 ? '+' : '';
+  showToast(`Last edit: ${sign}${delta} chars (${before.length} → ${after.length})`, delta >= 0 ? 'ok' : '');
 }
 
-// ─── Monaco Initialization ────────────────────────────────────────────────────
-function initMonaco() {
-  const editorContainer = $('monaco-editor') || $('editor-container') || $('editor');
-  if (!editorContainer || editorContainer.tagName === 'TEXTAREA') {
-    console.warn('Monaco container not found or is a textarea');
-  }
+// ─── CodeMirror 5 Initialization ─────────────────────────────────────────────
+function initCodeMirror() {
+  const container = $('cm-editor');
+  if (!container) { console.warn('[Diphoria] #cm-editor not found'); return; }
 
-  const target = $('monaco-editor') || $('editor-container') || (() => {
-    const div = document.createElement('div');
-    div.id = 'monaco-editor';
-    div.style.cssText = 'width:100%;height:100%;';
-    const area = $('editor');
-    if (area && area.parentElement) { area.parentElement.replaceChild(div, area); }
-    return div;
-  })();
-
-  const editor = window.monaco.editor.create(target, {
-    value:               '',
-    language:            'html',
-    theme:               'vs-dark',
-    fontSize:            S.settings.fontSize,
-    wordWrap:            S.settings.wordWrap,
-    minimap:             { enabled: !!S.settings.minimap },
-    formatOnPaste:       true,
-    autoIndent:          'full',
-    scrollBeyondLastLine: false,
-    tabSize:             2,
-    automaticLayout:     true,
+  const editor = CodeMirror(container, {
+    value:        '',
+    mode:         'htmlmixed',
+    theme:        'dracula',
+    lineNumbers:  true,
+    lineWrapping: S.settings.wordWrap !== 'off',
+    tabSize:      2,
+    indentWithTabs: false,
+    autoCloseTags:  true,
+    matchBrackets:  true,
+    autofocus:    false,
   });
 
-  window._monacoEditor = editor;
+  // Apply font size
+  const fs = S.settings.fontSize || 13;
+  container.style.fontSize = fs + 'px';
 
-  // Cursor position → #line-info
-  editor.onDidChangeCursorPosition((e) => {
+  window._cmEditor = editor;
+
+  // Cursor → line-info
+  editor.on('cursorActivity', () => {
+    const cur  = editor.getCursor();
     const info = $('line-info');
-    if (info) info.textContent = `Ln ${e.position.lineNumber}, Col ${e.position.column}`;
+    if (info) info.textContent = `Ln ${cur.line + 1}, Col ${cur.ch + 1}`;
   });
 
   // Content change → debounced preview + char count
-  editor.onDidChangeModelContent(() => {
+  editor.on('change', () => {
     const cc = $('char-count');
     if (cc) cc.textContent = editor.getValue().length.toLocaleString() + ' chars';
     schedulePreview();
@@ -1059,7 +1075,7 @@ function initMonaco() {
     saveBtn.addEventListener('click', () => {
       readSettingsFromForm();
       saveSettings();
-      applySettingsToMonaco(editor);
+      applySettingsToCM(editor);
       showToast('Settings saved', 'ok');
       const panel = $('settings-overlay') || $('settings-panel');
       if (panel) panel.classList.add('hidden');
@@ -1258,14 +1274,13 @@ function wireEvents() {
   // Update learn badge
   if (S.learningMode) updateLearnBadge(loadLearning());
 
-  require(['vs/editor/editor.main'], (monaco) => {
-    window.monaco = monaco;
-    initMonaco();
-    loadHistoryData().then(() => {
-      wireEvents();
-      checkOllama();
-      setInterval(checkOllama, 30000);
-      showWelcome();
-    });
+  // CodeMirror is loaded synchronously via <script> tags — no AMD loader needed
+  initCodeMirror();
+  loadHistoryData().then(() => {
+    wireEvents();
+    initModelSetup();          // show download overlay if model missing
+    checkModelStatus();
+    setInterval(checkModelStatus, 30000);
+    showWelcome();
   });
 })();

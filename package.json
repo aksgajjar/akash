@@ -1,16 +1,62 @@
 {
-  "name": "html-ai-studio",
-  "version": "2.0.0",
-  "description": "Local AI-powered HTML editor — no API key required, runs 100% offline",
+  "name": "diphoria-ai",
+  "version": "3.0.0",
+  "description": "Local AI-powered HTML editor — offline, no API key required",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "dev": "electron . --enable-logging"
+    "dev": "electron . --enable-logging",
+    "build:mac": "electron-builder --mac --arm64",
+    "build:all": "electron-builder --mac --arm64 --x64"
   },
   "devDependencies": {
-    "electron": "^28.3.3"
+    "electron": "^28.3.3",
+    "electron-builder": "^26.8.1"
   },
   "dependencies": {
-    "monaco-editor": "^0.45.0"
+    "codemirror": "^5.65.16",
+    "node-llama-cpp": "^3.1.1"
+  },
+  "build": {
+    "appId": "com.diphoria.ai",
+    "productName": "Diphoria AI",
+    "copyright": "Copyright © 2025 Diphoria",
+    "asar": true,
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer/**",
+      "src/**",
+      "node_modules/codemirror/lib/**",
+      "node_modules/codemirror/mode/xml/**",
+      "node_modules/codemirror/mode/javascript/**",
+      "node_modules/codemirror/mode/css/**",
+      "node_modules/codemirror/mode/htmlmixed/**",
+      "node_modules/codemirror/addon/edit/**",
+      "node_modules/codemirror/addon/fold/**",
+      "node_modules/codemirror/theme/dracula.css",
+      "node_modules/node-llama-cpp/**",
+      "!node_modules/node-llama-cpp/test/**",
+      "!node_modules/node-llama-cpp/.cache/**"
+    ],
+    "mac": {
+      "target": [
+        { "target": "dmg", "arch": ["arm64", "x64"] }
+      ],
+      "category": "public.app-category.developer-tools",
+      "darkModeSupport": true,
+      "minimumSystemVersion": "12.0"
+    },
+    "dmg": {
+      "title": "Diphoria AI",
+      "window": { "width": 540, "height": 380 }
+    },
+    "linux": {
+      "target": ["AppImage"],
+      "category": "Development"
+    }
   }
 }
