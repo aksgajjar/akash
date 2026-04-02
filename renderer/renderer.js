@@ -285,7 +285,168 @@ function toggleThinkMode() {
   showToast(S.thinkMode ? '🧠 Think Mode enabled' : '💨 Think Mode disabled');
 }
 
-// ─── Ollama Health ────────────────────────────────────────────────────────────
+// ─── Quick Edit Engine — instant CSS changes, zero AI calls ──────────────────
+// Maps natural language → CSS property:value, applied directly to the HTML string.
+// Runs in <50ms. Only falls through to AI if pattern not matched.
+
+const COLOR_MAP = {
+  'dark forest':'#0d1f0d','forest green':'#1a4a1a','forest':'#1a3a1a',
+  'dark green':'#0f2a0f','navy blue':'#001433','navy':'#001f3f',
+  'midnight blue':'#191970','midnight':'#0d0d2b','dark blue':'#0a0a2e',
+  'charcoal':'#1e1e1e','slate':'#1e293b','dark gray':'#1a1a1a',
+  'dark grey':'#1a1a1a','dark':'#0f0f1a','pitch black':'#000',
+  'black':'#000','white':'#fff','cream':'#fffdf4','off white':'#f5f5f0',
+  'light':'#f8f9fa','light gray':'#e9ecef','red':'#c0392b',
+  'dark red':'#7b1a1a','blue':'#2980b9','sky blue':'#3498db',
+  'purple':'#6c3483','violet':'#5b21b6','indigo':'#3730a3',
+  'green':'#1e8449','teal':'#0d7377','cyan':'#0891b2',
+  'orange':'#d35400','amber':'#d97706','yellow':'#b7950b',
+  'pink':'#c0186c','rose':'#9f1239','brown':'#6b3a2a',
+  'gray':'#4a4a4a','grey':'#4a4a4a',
+};
+
+function resolveColor(text) {
+  const lower = text.toLowerCase();
+  const hex = lower.match(/#[0-9a-f]{3,6}/i);
+  if (hex) return hex[0];
+  const rgb = lower.match(/rgb\([^)]+\)/i);
+  if (rgb) return rgb[0];
+  // Try longest match first
+  const sorted = Object.keys(COLOR_MAP).sort((a,b) => b.length - a.length);
+  for (const name of sorted) {
+    if (lower.includes(name)) return COLOR_MAP[name];
+  }
+  return null;
+}
+
+// Returns { type, value } if quick-editable, else null
+function classifyInstruction(instruction) {
+  const t = instruction.toLowerCase();
+  if (/background|bg color|bg-color/.test(t)) {
+    const c = resolveColor(t);
+    if (c) return { type:'background', value:c };
+  }
+  if (/text color|font color|color of text/.test(t)) {
+    const c = resolveColor(t);
+    if (c) return { type:'color', value:c };
+  }
+  if (/font.?size|text.?size|make.*(?:bigger|smaller|larger)/.test(t)) {
+    const size = t.match(/(\d+)\s*px/) || t.match(/(bigger|larger)/) || t.match(/(smaller)/);
+    if (size) return { type:'fontSize', value: size[1] === 'smaller' ? '13px' : (size[1] === 'bigger'||size[1] === 'larger') ? '17px' : size[1]+'px' };
+  }
+  return null;
+}
+
+// Apply CSS change directly to the HTML string — no AI needed
+function applyQuickCSS(html, type, value) {
+  let updated = html;
+
+  if (type === 'background') {
+    // Try updating body { background or background-color in <style>
+    updated = updated.replace(/(body\s*\{[^}]*?)(background(?:-color)?)\s*:\s*[^;]+;/s,
+      (m, pre, prop) => `${pre}${prop}:${value};`);
+    if (updated === html) {
+      // Try CSS variable --bg
+      updated = updated.replace(/(--bg\s*:\s*)[^;]+;/, `$1${value};`);
+    }
+    if (updated === html) {
+      // Inject into existing <style> body rule or add new style tag
+      if (/<style[^>]*>/.test(updated)) {
+        updated = updated.replace(/(<style[^>]*>)/, `$1\nbody{background-color:${value}!important}`);
+      } else {
+        updated = updated.replace(/<\/head>/i,
+          `<style>body{background-color:${value}!important}</style>\n</head>`);
+      }
+    }
+  }
+
+  if (type === 'color') {
+    updated = updated.replace(/(body\s*\{[^}]*?)(color)\s*:\s*[^;]+;/s,
+      (m, pre) => `${pre}color:${value};`);
+    if (updated === html) {
+      updated = updated.replace(/(<style[^>]*>)/, `$1\nbody{color:${value}!important}`);
+    }
+  }
+
+  if (type === 'fontSize') {
+    updated = updated.replace(/(body\s*\{[^}]*?)(font-size)\s*:\s*[^;]+;/s,
+      (m, pre) => `${pre}font-size:${value};`);
+    if (updated === html) {
+      updated = updated.replace(/(<style[^>]*>)/, `$1\nbody{font-size:${value}!important}`);
+    }
+  }
+
+  return updated;
+}
+
+// ─── Partial Edit — extract section, get snippet from AI, splice back ─────────
+function extractSectionForAI(html, instruction) {
+  const t = instruction.toLowerCase();
+
+  // For pure CSS/style changes → only send the <style> block
+  if (/background|color|font|spacing|padding|margin|border|shadow|animation|transition|hover/.test(t)) {
+    const styleMatch = html.match(/<style[^>]*>[\s\S]*?<\/style>/i);
+    if (styleMatch && styleMatch[0].length < 3000) {
+      return { snippet: styleMatch[0], mode: 'style-only' };
+    }
+  }
+
+  // For section-targeted edits → extract matching tag
+  const sectionHints = {
+    'header|nav|logo|navigation': 'header',
+    'footer': 'footer',
+    'button|btn': 'button',
+    'hero|banner': 'section',
+    'card|widget|box': 'div',
+    'table': 'table',
+    'form|input': 'form',
+  };
+  for (const [pattern, tag] of Object.entries(sectionHints)) {
+    if (new RegExp(pattern).test(t)) {
+      const tagMatch = html.match(new RegExp(`<${tag}[\\s\\S]*?<\\/${tag}>`, 'i'));
+      if (tagMatch && tagMatch[0].length < 3000) {
+        return { snippet: tagMatch[0], mode: tag };
+      }
+    }
+  }
+
+  // Fallback: send trimmed body (max 2500 chars)
+  const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+  if (bodyMatch) {
+    const trimmed = bodyMatch[0].slice(0, 2500);
+    return { snippet: trimmed, mode: 'body' };
+  }
+
+  // Last resort: first 2500 chars
+  return { snippet: html.slice(0, 2500), mode: 'raw' };
+}
+
+// Splice AI snippet back into the original full HTML
+function spliceSnippetBack(fullHtml, snippet, mode) {
+  // If snippet looks like full HTML, use it directly
+  if (/<!DOCTYPE|<html/i.test(snippet)) return snippet;
+
+  if (mode === 'style-only') {
+    const replaced = fullHtml.replace(/<style[^>]*>[\s\S]*?<\/style>/i, snippet);
+    return replaced !== fullHtml ? replaced : fullHtml;
+  }
+  if (mode === 'header') {
+    const replaced = fullHtml.replace(/<header[\s\S]*?<\/header>/i, snippet);
+    return replaced !== fullHtml ? replaced : fullHtml;
+  }
+  if (mode === 'footer') {
+    const replaced = fullHtml.replace(/<footer[\s\S]*?<\/footer>/i, snippet);
+    return replaced !== fullHtml ? replaced : fullHtml;
+  }
+  if (mode === 'body') {
+    const replaced = fullHtml.replace(/<body[^>]*>[\s\S]*?<\/body>/i, snippet);
+    return replaced !== fullHtml ? replaced : fullHtml;
+  }
+  // For other modes, try to find and replace the matching block
+  return fullHtml;
+}
+
+
 const BUILTIN_MODELS = ['qwen2.5-coder:7b', 'qwen2.5-coder:14b', 'codellama:7b', 'llama3.2:3b', 'mistral:7b'];
 
 async function checkOllama() {
@@ -399,127 +560,124 @@ async function sendMessage() {
   if (!html.trim()) { showToast('Paste some HTML first', 'err'); return; }
 
   const model      = modelSel ? modelSel.value : S.settings.defaultModel;
-  const ollamaHost = S.settings.ollamaHost || 'localhost';
+  const ollamaHost = S.settings.ollamaHost || '127.0.0.1';
 
-  // 1. Record to learning
   if (S.learningMode) addToLearning(instruction);
-
-  // 2. Auto backup BEFORE edit
   autoBackup(html, instruction);
-
   input.value = '';
   input.style.height = 'auto';
 
   appendMessage('user', `<div class="msg-bubble">${escapeHtml(instruction)}</div>`);
 
+  // ── ROUTE 1: Quick Edit — instant, no AI, <50ms ───────────────────────────
+  const quick = classifyInstruction(instruction);
+  if (quick && !S.pendingImageBase64) {
+    const updated = applyQuickCSS(html, quick.type, quick.value);
+    if (updated !== html) {
+      addHistory(instruction, updated);
+      applyHtmlToEditor(updated);
+      refreshPreview(updated);
+      appendMessage('ai', `<div class="msg-bubble">⚡ Quick Edit applied — ${quick.type}: <code>${quick.value}</code> (no AI needed)</div>`);
+      showToast('Applied instantly', 'ok');
+      return;
+    }
+  }
+
+  // ── ROUTE 2: AI Partial Edit — extract section, get snippet, splice back ──
+  if (S.isStreaming) return;
   S.isStreaming = true;
   setSendBusy(true);
-
-  const statusText = S.thinkMode ? 'Analyzing HTML structure...' : 'Thinking...';
-  const aiBubble   = appendMessage('ai', `<div class="msg-bubble streaming">${statusText}</div>`, 'streaming');
-
-  let raw        = '';
-  let tokenCount = 0;
   S.lastHtmlBeforeAI = html;
 
-  // 3. Build smart system prompt
-  const systemPrompt = buildSystemPrompt(instruction, html);
+  const aiBubble = appendMessage('ai', `<div class="msg-bubble streaming">Sending to AI...</div>`, 'streaming');
 
-  const onStatus = window.api.onStatus((msg) => {
-    if (aiBubble) aiBubble.querySelector('.msg-bubble').textContent = msg;
-  });
+  // Extract only relevant section — NOT full HTML
+  const { snippet, mode } = extractSectionForAI(html, instruction);
+
+  // Minimal system prompt — request snippet back, not full HTML
+  const systemPrompt = `You are an HTML/CSS editor. Modify ONLY what the instruction says. ` +
+    `Return ONLY the modified HTML/CSS snippet — not the full document. ` +
+    (S.safeMode ? 'Safe mode: change only the targeted section. ' : '') +
+    `No explanations, no markdown fences. Keep all IDs, classes, structure intact.`;
+
+  const userContent = `INSTRUCTION: ${instruction}\n\nHTML SNIPPET (mode: ${mode}):\n${snippet}`;
+
+  let raw = '';
+  let tokenCount = 0;
+  // 10-second warning timer
+  const warnTimer = setTimeout(() => {
+    if (S.isStreaming && aiBubble) {
+      aiBubble.querySelector('.msg-bubble').textContent = 'Still working... (10s) — try llama3.2:3b for speed';
+    }
+  }, 10000);
+
+  const onStatus = window.api.onStatus(() => {});
 
   const onChunk = window.api.onChunk((chunk) => {
     raw += chunk;
     tokenCount++;
     if (aiBubble) {
-      aiBubble.querySelector('.msg-bubble').innerHTML = S.thinkMode
-        ? `Analyzing &amp; writing... (${tokenCount} tokens)`
-        : `Writing... (${tokenCount} tokens)`;
+      aiBubble.querySelector('.msg-bubble').textContent = `Writing... (${tokenCount} tokens)`;
     }
   });
 
   const onDone = window.api.onDone((result) => {
+    clearTimeout(warnTimer);
     cleanupStream();
     S.isStreaming = false;
     setSendBusy(false);
 
-    const finalRaw  = (result && result.html) ? result.html : raw;
-    const resultHTML = extractHtml(finalRaw);
-
-    // 4. Validate HTML
+    const rawResponse = (result && result.html) ? result.html : raw;
+    // Splice snippet response back into full HTML
+    const merged = spliceSnippetBack(html, rawResponse.trim(), mode);
+    // Validate merged result
     if (S.validateMode) {
-      const validation = validateHTML(resultHTML);
-      if (!validation.valid) {
+      const v = validateHTML(merged);
+      if (!v.valid) {
         if (aiBubble) {
           aiBubble.classList.remove('streaming');
-          const bubble = aiBubble.querySelector('.msg-bubble');
-          if (bubble) {
-            bubble.className = 'msg-bubble validation-err';
-            bubble.innerHTML = `⚠ Invalid HTML rejected<br><small>${escapeHtml(validation.error)}</small>`;
-          }
+          const b = aiBubble.querySelector('.msg-bubble');
+          if (b) { b.className = 'msg-bubble validation-err'; b.innerHTML = `⚠ Rejected: ${escapeHtml(v.error)}`; }
         }
-        showToast('AI returned invalid HTML — change not applied', 'err');
+        showToast('AI output invalid — not applied', 'err');
         return;
       }
     }
 
-    // 5. Detect think block
-    let displayMsg = '';
-    const thinkMatch = resultHTML.match(/<!--\s*THINK:([\s\S]*?)-->/i);
-    if (thinkMatch) {
-      displayMsg = `<div class="think-block">🧠 ${escapeHtml(thinkMatch[1].trim())}</div>`;
-    }
-
-    // 6. Count changes
-    const oldLines = html.split('\n').length;
-    const newLines = resultHTML.split('\n').length;
-    const delta    = newLines - oldLines;
-    const deltaStr = delta >= 0 ? `+${delta}` : `${delta}`;
-    const editMatches = (resultHTML.match(/DIPHORIA-EDIT:/g) || []).length;
-    const editNote = editMatches > 0
-      ? ` · ${editMatches} section${editMatches > 1 ? 's' : ''} edited`
-      : '';
-
-    displayMsg += `✓ Applied — ${deltaStr} lines${editNote}`;
-    if (S.pendingImageBase64) displayMsg += ' · used image reference';
+    addHistory(instruction, merged);
+    applyHtmlToEditor(merged);
+    refreshPreview(merged);
 
     if (aiBubble) {
       aiBubble.classList.remove('streaming');
       aiBubble.querySelector('.msg-bubble').innerHTML =
-        `<div class="msg-bubble">${displayMsg}</div>`;
+        `✓ Applied via AI (${tokenCount} tokens · mode: ${mode})`;
     }
-
-    // 7. Apply to editor
-    addHistory(instruction, resultHTML);
-    applyHtmlToEditor(resultHTML);
-    refreshPreview(resultHTML);
-    showToast('Changes applied by Diphoria AI', 'ok');
+    showToast('Changes applied', 'ok');
   });
 
   const onError = window.api.onError((err) => {
+    clearTimeout(warnTimer);
     cleanupStream();
     S.isStreaming = false;
     setSendBusy(false);
     if (aiBubble) {
       aiBubble.classList.remove('streaming');
-      const bubble = aiBubble.querySelector('.msg-bubble');
-      if (bubble) {
-        bubble.className = 'msg-bubble validation-err';
-        bubble.textContent = '✗ ' + err;
-      }
+      const b = aiBubble.querySelector('.msg-bubble');
+      if (b) { b.className = 'msg-bubble validation-err'; b.textContent = '✗ ' + err; }
     }
     showToast(err, 'err');
   });
 
   S.streamCleanup = [onStatus, onChunk, onDone, onError];
 
+  // Send snippet (not full HTML) to AI
   window.api.aiStreamStart({
-    html,
+    html: snippet,           // ← only the relevant section
     instruction,
     model,
     ollamaHost,
-    systemPrompt,
+    systemPrompt,            // ← compact snippet-only prompt
     imageBase64: S.pendingImageBase64 || null,
   });
 }

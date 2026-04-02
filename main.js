@@ -105,17 +105,18 @@ ipcMain.handle('ollama-models', async () => {
 // ─── Ollama streaming inference ───────────────────────────────────────────────
 // Performance defaults — tuned for MacBook Pro 2021 (16GB shared RAM)
 const PERF = {
-  num_ctx:     3072,   // was 16384 — ~70% less RAM per request
-  num_predict: 2048,   // was 8192  — caps response length, prevents runaway generation
-  temperature: 0.1,
-  timeout_ms:  60000   // was 120000 — fail fast, don't freeze UI
+  num_ctx:     2048,   // hard cap — fits in ~1GB RAM, handles snippets not full files
+  num_predict: 1024,   // max ~800 tokens output — enough for a section, not a full page
+  temperature: 0.05,   // near-deterministic — less creative rambling, faster stop
+  timeout_ms:  30000   // 30s hard timeout — fail fast
 }
 
 const DEFAULT_SYSTEM = `You are a senior HTML/CSS/JS developer. Apply the instruction and return ONLY the complete updated HTML. No explanations, no markdown fences. Preserve all content not mentioned. Mark edits with <!-- DIPHORIA-EDIT: description -->.`
 
 // Trim oversized HTML before sending — keeps input tokens under ~1200
 // Sends: full head + body trimmed to maxChars + closing tags
-function trimHTMLForAI(html, maxChars = 5000) {
+// Renderer now sends snippets (~2500 chars), but guard here too
+function trimHTMLForAI(html, maxChars = 2800) {
   if (html.length <= maxChars) return html
   const headMatch = html.match(/<head[\s\S]*?<\/head>/i)
   const head = headMatch ? headMatch[0] : ''
