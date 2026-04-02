@@ -209,8 +209,8 @@ ipcMain.on('model-download', async (event, modelId) => {
 
 // ─── AI streaming inference ───────────────────────────────────────────────────
 const PERF = {
-  contextSize: 4096,
-  maxTokens:   2048,
+  contextSize: 8192,
+  maxTokens:   1500,
   temperature: 0.05,
 }
 

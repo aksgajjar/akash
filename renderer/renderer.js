@@ -370,50 +370,74 @@ function applyQuickCSS(html, type, value) {
 
 // ─── Partial Edit — extract section, get snippet from AI, splice back ─────────
 function extractSectionForAI(html, instruction) {
-  const t = instruction.toLowerCase();
+  const t   = instruction.toLowerCase();
+  const MAX = 5000; // max chars sent to model (fits ~1250 tokens)
 
-  // For pure CSS/style changes → only send the <style> block
+  // ── Add / insert a new section ──────────────────────────────────────────
+  if (/add.*section|new.*section|section.*below|create.*section|insert.*section|add.*card|add.*block/.test(t)) {
+    const style    = html.match(/<style[^>]*>[\s\S]*?<\/style>/i);
+    const css      = style ? style[0].slice(0, 1800) : '';
+    const body     = html.match(/<body[^>]*>[\s\S]*?<\/body>/i);
+    const bodyEnd  = body ? body[0].slice(-1500) : html.slice(-1500); // tail to know where to append
+    const snippet  = css
+      ? `${css}\n<!-- existing body tail -->\n${bodyEnd}`
+      : bodyEnd;
+    return { snippet: snippet.slice(0, MAX), mode: 'add-section' };
+  }
+
+  // ── CSS / Style-only changes ────────────────────────────────────────────
   if (/background|color|font|spacing|padding|margin|border|shadow|animation|transition|hover/.test(t)) {
     const styleMatch = html.match(/<style[^>]*>[\s\S]*?<\/style>/i);
-    if (styleMatch && styleMatch[0].length < 3000) {
+    if (styleMatch && styleMatch[0].length < MAX) {
       return { snippet: styleMatch[0], mode: 'style-only' };
     }
   }
 
-  // For section-targeted edits → extract matching tag
+  // ── Section-targeted edits ──────────────────────────────────────────────
   const sectionHints = {
     'header|nav|logo|navigation': 'header',
-    'footer': 'footer',
-    'button|btn': 'button',
-    'hero|banner': 'section',
-    'card|widget|box': 'div',
-    'table': 'table',
-    'form|input': 'form',
+    'footer':                     'footer',
+    'button|btn':                 'button',
+    'hero|banner':                'section',
+    'card|widget|box':            'div',
+    'table':                      'table',
+    'form|input':                 'form',
   };
   for (const [pattern, tag] of Object.entries(sectionHints)) {
     if (new RegExp(pattern).test(t)) {
       const tagMatch = html.match(new RegExp(`<${tag}[\\s\\S]*?<\\/${tag}>`, 'i'));
-      if (tagMatch && tagMatch[0].length < 3000) {
+      if (tagMatch && tagMatch[0].length < MAX) {
         return { snippet: tagMatch[0], mode: tag };
       }
     }
   }
 
-  // Fallback: send trimmed body (max 2500 chars)
-  const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
-  if (bodyMatch) {
-    const trimmed = bodyMatch[0].slice(0, 2500);
-    return { snippet: trimmed, mode: 'body' };
+  // ── Layout / full structural changes ───────────────────────────────────
+  if (/layout|redesign|restructure|rewrite|mobile|responsive/.test(t)) {
+    const style    = html.match(/<style[^>]*>[\s\S]*?<\/style>/i);
+    const css      = style ? style[0].slice(0, 1200) : '';
+    const body     = html.match(/<body[^>]*>[\s\S]*?<\/body>/i);
+    const bodyChunk = body ? body[0].slice(0, 3500) : html.slice(0, 3500);
+    const snippet  = css ? `${css}\n${bodyChunk}` : bodyChunk;
+    return { snippet: snippet.slice(0, MAX), mode: 'body' };
   }
 
-  // Last resort: first 2500 chars
-  return { snippet: html.slice(0, 2500), mode: 'raw' };
+  // ── Fallback: trimmed body ──────────────────────────────────────────────
+  const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+  if (bodyMatch) return { snippet: bodyMatch[0].slice(0, MAX), mode: 'body' };
+  return { snippet: html.slice(0, MAX), mode: 'raw' };
 }
 
 // Splice AI snippet back into the original full HTML
 function spliceSnippetBack(fullHtml, snippet, mode) {
-  // Full rewrite mode or AI returned a complete document — use directly
-  if (mode === 'full' || /<!DOCTYPE|<html/i.test(snippet)) return snippet;
+  // Complete document returned — use directly
+  if (/<!DOCTYPE|<html/i.test(snippet)) return snippet;
+
+  // New section injection — insert before </body>
+  if (mode === 'add-section') {
+    const injected = fullHtml.replace(/<\/body>/i, `\n${snippet}\n</body>`);
+    return injected !== fullHtml ? injected : fullHtml;
+  }
 
   if (mode === 'style-only') {
     const replaced = fullHtml.replace(/<style[^>]*>[\s\S]*?<\/style>/i, snippet);
@@ -627,7 +651,7 @@ async function sendMessage() {
     }
   }
 
-  // ── ROUTE 2: AI Full Rewrite ──────────────────────────────────────────────
+  // ── ROUTE 2: AI Edit ──────────────────────────────────────────────────────
   if (S.isStreaming) return;
   S.isStreaming = true;
   setSendBusy(true);
@@ -635,21 +659,29 @@ async function sendMessage() {
 
   const aiBubble = appendMessage('ai', `<div class="msg-bubble streaming">Sending to AI...</div>`, 'streaming');
 
-  // Always send full HTML — allows layout changes and full document rewrites
-  const mode = 'full';
+  // Smart extraction — send only the relevant portion (model context is limited)
+  const { snippet, mode } = extractSectionForAI(html, instruction);
 
-  const systemPrompt = buildSystemPrompt(instruction, html);
+  // Mode-aware system prompt
+  let systemPrompt;
+  if (mode === 'add-section') {
+    systemPrompt = `You are an HTML/CSS developer. Based on the existing style and structure shown, generate ONLY the new HTML section requested. Return ONLY the new section HTML — no full document, no explanations, no markdown.`;
+  } else if (mode === 'style-only') {
+    systemPrompt = `You are an HTML/CSS developer. Modify the <style> block as instructed. Return ONLY the updated <style> block — nothing else.`;
+  } else {
+    systemPrompt = buildSystemPrompt(instruction, html);
+  }
 
-  const userContent = `INSTRUCTION: ${instruction}\n\nHTML:\n${html}`;
+  const userContent = `INSTRUCTION: ${instruction}\n\nHTML:\n${snippet}`;
 
   let raw = '';
   let tokenCount = 0;
   // 10-second warning timer
   const warnTimer = setTimeout(() => {
     if (S.isStreaming && aiBubble) {
-      aiBubble.querySelector('.msg-bubble').textContent = 'Still working... (10s) — try llama3.2:3b for speed';
+      aiBubble.querySelector('.msg-bubble').textContent = 'Still working... generating response';
     }
-  }, 10000);
+  }, 30000);
 
   const onStatus = window.api.onStatus(() => {});
 
