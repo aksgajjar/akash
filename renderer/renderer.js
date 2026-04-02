@@ -536,16 +536,20 @@ function setStatusLabel(text, ok) {
 }
 
 // ─── Preview ──────────────────────────────────────────────────────────────────
-function refreshPreview(html) {
-  const iframe = $('preview');
+function refreshPreview() {
+  const html    = window._cmEditor ? window._cmEditor.getValue() : '';
+  const iframe  = $('preview');
   const placeholder = $('pv-placeholder');
-  const content = html !== undefined ? html : (window._cmEditor ? window._cmEditor.getValue() : '');
-  if (!content.trim()) {
+  if (!html.trim()) {
     if (placeholder) placeholder.style.display = '';
     if (iframe) iframe.srcdoc = '';
-  } else {
-    if (placeholder) placeholder.style.display = 'none';
-    if (iframe) iframe.srcdoc = content;
+    return;
+  }
+  if (placeholder) placeholder.style.display = 'none';
+  if (iframe) {
+    iframe.srcdoc = html;
+    console.log('Preview refreshed');
+    try { iframe.contentWindow.location.reload(); } catch {}
   }
   updatePvSize();
 }
@@ -616,7 +620,7 @@ async function sendMessage() {
     if (updated !== html) {
       addHistory(instruction, updated);
       applyHtmlToEditor(updated);
-      refreshPreview(updated);
+      refreshPreview();
       appendMessage('ai', `<div class="msg-bubble">⚡ Quick Edit applied — ${quick.type}: <code>${quick.value}</code> (no AI needed)</div>`);
       showToast('Applied instantly', 'ok');
       return;
@@ -686,7 +690,7 @@ async function sendMessage() {
 
     addHistory(instruction, merged);
     applyHtmlToEditor(merged);
-    refreshPreview(merged);
+    refreshPreview();
 
     if (aiBubble) {
       aiBubble.classList.remove('streaming');
@@ -779,7 +783,7 @@ function renderHistory() {
       const entry = S.history.find((h) => h.id === id);
       if (!entry) return;
       applyHtmlToEditor(entry.html);
-      refreshPreview(entry.html);
+      refreshPreview();
       showToast('Version restored');
       closeAllOverlays();
     });
@@ -896,7 +900,7 @@ async function openFile() {
     const result = await window.api.openFile();
     if (!result || !result.content) return;
     applyHtmlToEditor(result.content);
-    refreshPreview(result.content);
+    refreshPreview();
     if (result.filePath) {
       const parts = result.filePath.split(/[\\/]/);
       S.currentFile = parts[parts.length - 1];
@@ -955,7 +959,7 @@ function clearEditor() {
   const editor = window._cmEditor;
   if (!editor) return;
   applyHtmlToEditor('');
-  refreshPreview('');
+  refreshPreview();
   const fn = $('filename');
   if (fn) fn.textContent = '';
   S.currentFile = '';
