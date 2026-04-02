@@ -1,7 +1,7 @@
 {
-  "name": "html-ai-editor",
-  "version": "1.0.0",
-  "description": "Personal AI-powered HTML editor desktop app",
+  "name": "html-ai-studio",
+  "version": "2.0.0",
+  "description": "Local AI-powered HTML editor — no API key required, runs 100% offline",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
@@ -10,7 +10,7 @@
   "devDependencies": {
     "electron": "^28.3.3"
   },
-  "engines": {
-    "node": ">=18.0.0"
+  "dependencies": {
+    "monaco-editor": "^0.45.0"
   }
 }

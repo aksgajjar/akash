@@ -2,227 +2,343 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline';">
-  <title>HTML AI Editor</title>
+  <meta http-equiv="Content-Security-Policy"
+    content="default-src 'self' 'unsafe-inline' 'unsafe-eval' file: data:; connect-src http://localhost:11434; img-src * data: blob:; worker-src blob: file:;">
+  <title>HTML AI Studio</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-  <!-- ── Top Bar ─────────────────────────────────────────────────────────── -->
-  <header class="topbar">
-    <div class="topbar-left">
-      <div class="app-logo">
-        <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-          <rect x="2" y="2" width="7" height="7" rx="1.5" fill="#6366f1"/>
-          <rect x="11" y="2" width="7" height="7" rx="1.5" fill="#6366f1" opacity="0.5"/>
-          <rect x="2" y="11" width="7" height="7" rx="1.5" fill="#6366f1" opacity="0.5"/>
-          <rect x="11" y="11" width="7" height="7" rx="1.5" fill="#6366f1"/>
-        </svg>
+<!-- ══════════════════════ TOP BAR ═══════════════════════════════════════════ -->
+<header class="topbar" id="topbar">
+  <div class="tb-left">
+    <div class="logo">
+      <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
+        <rect x="2"  y="2"  width="8" height="8" rx="2" fill="#7c3aed"/>
+        <rect x="12" y="2"  width="8" height="8" rx="2" fill="#7c3aed" opacity=".45"/>
+        <rect x="2"  y="12" width="8" height="8" rx="2" fill="#7c3aed" opacity=".45"/>
+        <rect x="12" y="12" width="8" height="8" rx="2" fill="#7c3aed"/>
+      </svg>
+      <span class="logo-text">HTML AI Studio</span>
+    </div>
+    <div class="tb-sep"></div>
+    <button class="tb-btn" id="btn-open">
+      <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><path d="M2 2.5A1.5 1.5 0 013.5 1h3a.5.5 0 01.354.146L8.207 2.5H10.5A1.5 1.5 0 0112 4v7a1.5 1.5 0 01-1.5 1.5h-7A1.5 1.5 0 012 11V2.5z"/></svg>
+      Open
+    </button>
+    <button class="tb-btn" id="btn-save">
+      <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><path d="M2.5 1A1.5 1.5 0 001 2.5v9A1.5 1.5 0 002.5 13h9a1.5 1.5 0 001.5-1.5V4a.5.5 0 00-.146-.354l-3-3A.5.5 0 009.5 0.5H2.5zM9 1.5V4h2.793L9 1.707V1.5zM4 8.5h6v1H4v-1zm0-2h6v1H4v-1z"/></svg>
+      Save
+    </button>
+    <span class="filename" id="filename"></span>
+  </div>
+
+  <div class="tb-center">
+    <button class="palette-trigger" id="btn-palette">
+      <svg width="13" height="13" viewBox="0 0 13 13" fill="currentColor" opacity=".5"><path d="M5 1a4 4 0 100 8A4 4 0 005 1zm6.707 9.293l-2.56-2.56A5.5 5.5 0 1010.5 5.5a5.47 5.47 0 01-1.354 3.596l2.56 2.56a1 1 0 01-1.414 1.415z"/></svg>
+      <span>Command Palette</span>
+      <kbd>⌘K</kbd>
+    </button>
+  </div>
+
+  <div class="tb-right">
+    <!-- Preview viewport controls -->
+    <div class="viewport-btns">
+      <button class="vp-btn active" data-vp="desktop" title="Desktop">
+        <svg width="15" height="15" viewBox="0 0 15 15" fill="currentColor"><rect x="1" y="2" width="13" height="9" rx="1.5" stroke="currentColor" stroke-width="1.2" fill="none"/><path d="M5 13h5M7.5 11v2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+      </button>
+      <button class="vp-btn" data-vp="tablet" title="Tablet">
+        <svg width="15" height="15" viewBox="0 0 15 15" fill="currentColor"><rect x="3" y="1" width="9" height="13" rx="1.5" stroke="currentColor" stroke-width="1.2" fill="none"/><circle cx="7.5" cy="11.5" r=".7" fill="currentColor"/></svg>
+      </button>
+      <button class="vp-btn" data-vp="mobile" title="Mobile">
+        <svg width="15" height="15" viewBox="0 0 15 15" fill="currentColor"><rect x="4.5" y="1" width="6" height="13" rx="1.5" stroke="currentColor" stroke-width="1.2" fill="none"/><circle cx="7.5" cy="11.5" r=".7" fill="currentColor"/></svg>
+      </button>
+    </div>
+
+    <div class="tb-sep"></div>
+
+    <!-- Ollama status -->
+    <div class="ollama-status" id="ollama-status" title="Ollama connection status">
+      <span class="status-dot" id="status-dot"></span>
+      <span id="status-label">Checking...</span>
+    </div>
+
+    <div class="tb-sep"></div>
+    <button class="tb-btn tb-icon-btn" id="btn-settings" title="Settings">
+      <svg width="15" height="15" viewBox="0 0 15 15" fill="currentColor"><path d="M7.5 5.5a2 2 0 100 4 2 2 0 000-4zm-3.5 2a3.5 3.5 0 117 0 3.5 3.5 0 01-7 0zM6.56.44a.5.5 0 01.88 0l.77 1.54a5.5 5.5 0 011.2.5l1.65-.55a.5.5 0 01.54.18l1 1.73a.5.5 0 01-.08.62l-1.2 1.08a5.5 5.5 0 010 1.4l1.2 1.08a.5.5 0 01.08.62l-1 1.73a.5.5 0 01-.54.18l-1.65-.55a5.5 5.5 0 01-1.2.5l-.77 1.54a.5.5 0 01-.88 0l-.77-1.54a5.5 5.5 0 01-1.2-.5l-1.65.55a.5.5 0 01-.54-.18l-1-1.73a.5.5 0 01.08-.62l1.2-1.08a5.5 5.5 0 010-1.4L1.42 4.54a.5.5 0 01-.08-.62l1-1.73a.5.5 0 01.54-.18l1.65.55a5.5 5.5 0 011.2-.5L6.56.44z"/></svg>
+    </button>
+  </div>
+</header>
+
+<!-- ══════════════════════ WORKSPACE ═════════════════════════════════════════ -->
+<div class="workspace" id="workspace">
+
+  <!-- ── Editor Panel ──────────────────────────────────────────────────────── -->
+  <div class="panel ed-panel" id="ed-panel">
+    <div class="panel-bar">
+      <div class="panel-bar-left">
+        <span class="panel-tag">HTML</span>
+        <span class="line-info" id="line-info">Ln 1, Col 1</span>
       </div>
-      <span class="app-title">HTML AI Editor</span>
-      <span class="file-name" id="file-name"></span>
-    </div>
-
-    <div class="topbar-center">
-      <span class="status-msg" id="status-msg"></span>
-    </div>
-
-    <div class="topbar-right">
-      <button class="topbar-btn" id="btn-open" title="Open HTML file (Cmd+O)">
-        <svg width="15" height="15" viewBox="0 0 15 15" fill="currentColor">
-          <path d="M2 3.5A1.5 1.5 0 013.5 2h3.25a.5.5 0 01.354.146l1.25 1.25A.5.5 0 018.708 3.5H11.5A1.5 1.5 0 0113 5v6.5A1.5 1.5 0 0111.5 13h-8A1.5 1.5 0 012 11.5v-8zm5.5-1H3.5a.5.5 0 00-.5.5v8a.5.5 0 00.5.5h8a.5.5 0 00.5-.5V5a.5.5 0 00-.5-.5H8.708L7.5 3.292V2.5z"/>
-        </svg>
-        Open
-      </button>
-      <button class="topbar-btn" id="btn-save" title="Save HTML file (Cmd+S)">
-        <svg width="15" height="15" viewBox="0 0 15 15" fill="currentColor">
-          <path d="M3 1.5A1.5 1.5 0 011.5 3v9A1.5 1.5 0 003 13.5h9a1.5 1.5 0 001.5-1.5V4.5a.5.5 0 00-.146-.354l-3-3A.5.5 0 0010 1H3.5A1.5 1.5 0 003 1.5zm7 8.5H5a.5.5 0 010-1h5a.5.5 0 010 1zm0-2H5a.5.5 0 010-1h5a.5.5 0 010 1zm-3-5a.5.5 0 01.5-.5h2a.5.5 0 010 1H7.5A.5.5 0 017 3z"/>
-        </svg>
-        Save
-      </button>
-      <div class="topbar-divider"></div>
-      <button class="topbar-btn topbar-btn-icon" id="btn-settings" title="Settings">
-        <svg width="15" height="15" viewBox="0 0 15 15" fill="currentColor">
-          <path d="M7.5 1a6.5 6.5 0 100 13A6.5 6.5 0 007.5 1zm0 2a4.5 4.5 0 110 9 4.5 4.5 0 010-9zm0 1.5a3 3 0 100 6 3 3 0 000-6z" opacity="0.3"/>
-          <path d="M7.5 5a2.5 2.5 0 100 5 2.5 2.5 0 000-5zm0 1a1.5 1.5 0 110 3 1.5 1.5 0 010-3z"/>
-          <path d="M6.935.462A.5.5 0 017.5 0h0a.5.5 0 01.5.45l.09.9a5.5 5.5 0 011.277.528l.762-.524a.5.5 0 01.638.073l.354.354a.5.5 0 01.073.638l-.524.762a5.5 5.5 0 01.528 1.277l.9.09A.5.5 0 0112 5v.5a.5.5 0 01-.45.5l-.9.09a5.5 5.5 0 01-.528 1.277l.524.762a.5.5 0 01-.073.638l-.354.354a.5.5 0 01-.638.073l-.762-.524a5.5 5.5 0 01-1.277.528l-.09.9A.5.5 0 017.5 10h0a.5.5 0 01-.5-.45l-.09-.9a5.5 5.5 0 01-1.277-.528l-.762.524a.5.5 0 01-.638-.073l-.354-.354a.5.5 0 01-.073-.638l.524-.762A5.5 5.5 0 013.802 6.1l-.9-.09A.5.5 0 012.5 5.5V5a.5.5 0 01.45-.5l.9-.09A5.5 5.5 0 014.378 3.133l-.524-.762a.5.5 0 01.073-.638l.354-.354a.5.5 0 01.638-.073l.762.524A5.5 5.5 0 016.958 1.36l.09-.9z"/>
-        </svg>
-      </button>
-    </div>
-  </header>
-
-  <!-- ── Main: Editor + Preview ────────────────────────────────────────────── -->
-  <main class="workspace">
-
-    <!-- Left: Editor panel -->
-    <section class="panel editor-panel" id="editor-panel">
-      <div class="panel-header">
-        <span class="panel-label">HTML Source</span>
-        <div class="panel-header-actions">
-          <button class="pill-btn" id="btn-format">Format</button>
-          <button class="pill-btn" id="btn-clear">Clear</button>
-          <div class="history-wrap">
-            <button class="pill-btn" id="btn-history">History <span class="history-count" id="history-count"></span></button>
-            <div class="history-panel hidden" id="history-panel">
-              <div class="history-header">
-                <span>Version History</span>
-                <button class="history-clear-btn" id="btn-clear-history">Clear all</button>
-              </div>
-              <div class="history-list" id="history-list"></div>
+      <div class="panel-bar-right">
+        <button class="pill-btn" id="btn-format">Format</button>
+        <button class="pill-btn" id="btn-diff" title="Show what AI changed">Diff</button>
+        <div class="history-wrap">
+          <button class="pill-btn" id="btn-history">
+            History <span class="badge" id="history-badge"></span>
+          </button>
+          <div class="history-dropdown hidden" id="history-dropdown">
+            <div class="hd-head">
+              <span>Versions</span>
+              <button id="btn-clear-history">Clear</button>
             </div>
+            <div class="hd-list" id="hd-list"></div>
           </div>
         </div>
-      </div>
-      <textarea id="editor" spellcheck="false" autocorrect="off" autocapitalize="off" placeholder="Paste your HTML here, or click Open to load a file..."></textarea>
-      <div class="char-count" id="char-count">0 chars</div>
-    </section>
-
-    <!-- Resize handle -->
-    <div class="resize-handle" id="resize-handle" title="Drag to resize"></div>
-
-    <!-- Right: Preview panel -->
-    <section class="panel preview-panel" id="preview-panel">
-      <div class="panel-header">
-        <span class="panel-label">Live Preview</span>
-        <div class="panel-header-actions">
-          <button class="pill-btn" id="btn-refresh">Refresh</button>
-          <label class="toggle-wrap" title="Auto-refresh preview as you type">
-            <input type="checkbox" id="toggle-autorefresh" checked>
-            <span class="toggle-track"><span class="toggle-thumb"></span></span>
-            <span class="toggle-label">Auto</span>
-          </label>
-        </div>
-      </div>
-      <div class="preview-container">
-        <iframe id="preview" sandbox="allow-scripts allow-same-origin allow-forms" title="HTML Preview"></iframe>
-        <div class="preview-empty" id="preview-empty">
-          <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
-            <rect x="8" y="8" width="32" height="32" rx="4" stroke="#3d3d5c" stroke-width="2"/>
-            <path d="M16 20l6 6-6 6M26 32h6" stroke="#3d3d5c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
-          <p>Preview will appear here</p>
-          <small>Paste HTML in the editor to see it rendered</small>
-        </div>
-      </div>
-    </section>
-
-  </main>
-
-  <!-- ── Bottom: AI Instruction Bar ────────────────────────────────────────── -->
-  <footer class="ai-bar">
-    <div class="ai-bar-inner">
-      <div class="ai-input-wrap">
-        <div class="ai-input-icon">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" opacity="0.5">
-            <path d="M8 1a7 7 0 100 14A7 7 0 008 1zm0 1.5a5.5 5.5 0 110 11 5.5 5.5 0 010-11zm0 2a.75.75 0 100 1.5.75.75 0 000-1.5zm-.75 2.5a.75.75 0 011.5 0v3a.75.75 0 01-1.5 0V7z"/>
-          </svg>
-        </div>
-        <textarea
-          id="instruction"
-          rows="1"
-          spellcheck="true"
-          placeholder='Tell the AI what to do: "fix layout", "make mobile responsive", "remove the header", "clean and format code", "add dark mode"...'
-        ></textarea>
-      </div>
-
-      <div class="ai-bar-actions">
-        <div class="model-badge" id="model-badge" title="Click Settings to change">claude-sonnet-4-6</div>
-        <button class="apply-btn" id="btn-apply">
-          <span class="apply-btn-text" id="apply-btn-text">Apply Changes</span>
-          <span class="apply-btn-spinner hidden" id="apply-spinner">
-            <span class="dot"></span><span class="dot"></span><span class="dot"></span>
-          </span>
-          <svg class="apply-btn-icon" width="14" height="14" viewBox="0 0 14 14" fill="currentColor">
-            <path d="M7 1L13 7L7 13M1 7h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-          </svg>
-        </button>
       </div>
     </div>
-  </footer>
+    <!-- Monaco mounts here -->
+    <div id="monaco-container"></div>
+  </div>
 
-  <!-- ── Settings Modal ────────────────────────────────────────────────────── -->
-  <div class="modal-backdrop hidden" id="modal-backdrop">
-    <div class="modal" role="dialog" aria-modal="true" aria-label="Settings">
-      <div class="modal-header">
-        <h2>Settings</h2>
-        <button class="modal-close" id="modal-close" aria-label="Close settings">
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor">
-            <path d="M1 1l12 12M13 1L1 13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" fill="none"/>
-          </svg>
-        </button>
+  <!-- resize handle -->
+  <div class="resizer" id="resizer"></div>
+
+  <!-- ── Preview Panel ─────────────────────────────────────────────────────── -->
+  <div class="panel pv-panel" id="pv-panel">
+    <div class="panel-bar">
+      <div class="panel-bar-left">
+        <span class="panel-tag">PREVIEW</span>
+        <span class="pv-size" id="pv-size"></span>
       </div>
-      <div class="modal-body">
-
-        <div class="setting-row">
-          <label class="setting-label" for="setting-provider">AI Provider</label>
-          <select class="setting-select" id="setting-provider">
-            <option value="claude">Anthropic Claude</option>
-            <option value="openai">OpenAI GPT</option>
-          </select>
-        </div>
-
-        <div class="setting-row" id="claude-models-row">
-          <label class="setting-label" for="setting-model-claude">Claude Model</label>
-          <select class="setting-select" id="setting-model-claude">
-            <option value="claude-sonnet-4-6">claude-sonnet-4-6 — balanced (recommended)</option>
-            <option value="claude-opus-4-6">claude-opus-4-6 — most powerful</option>
-            <option value="claude-haiku-4-5-20251001">claude-haiku-4-5 — fastest &amp; cheapest</option>
-          </select>
-        </div>
-
-        <div class="setting-row hidden" id="openai-models-row">
-          <label class="setting-label" for="setting-model-openai">OpenAI Model</label>
-          <select class="setting-select" id="setting-model-openai">
-            <option value="gpt-4o">gpt-4o — recommended</option>
-            <option value="gpt-4o-mini">gpt-4o-mini — faster &amp; cheaper</option>
-            <option value="gpt-4-turbo">gpt-4-turbo</option>
-          </select>
-        </div>
-
-        <div class="setting-row">
-          <label class="setting-label" for="setting-apikey">API Key</label>
-          <div class="apikey-wrap">
-            <input
-              class="setting-input"
-              type="password"
-              id="setting-apikey"
-              placeholder="Paste your API key here..."
-              autocomplete="off"
-              spellcheck="false"
-            >
-            <button class="apikey-toggle" id="apikey-toggle" title="Show/hide key">
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" id="eye-icon">
-                <path d="M7 2C3.5 2 1 7 1 7s2.5 5 6 5 6-5 6-5-2.5-5-6-5zm0 8a3 3 0 110-6 3 3 0 010 6zm0-4.5a1.5 1.5 0 100 3 1.5 1.5 0 000-3z"/>
-              </svg>
-            </button>
-          </div>
-          <div class="setting-hint" id="provider-hint">
-            Get your key at: console.anthropic.com
-          </div>
-        </div>
-
-        <div class="setting-row">
-          <label class="setting-label" for="setting-history-limit">Keep History (versions)</label>
-          <select class="setting-select" id="setting-history-limit">
-            <option value="10">10 versions</option>
-            <option value="20" selected>20 versions</option>
-            <option value="50">50 versions</option>
-          </select>
-        </div>
-
+      <div class="panel-bar-right">
+        <label class="auto-label" title="Live update as you type">
+          <input type="checkbox" id="auto-preview" checked>
+          <span class="auto-track"><span class="auto-thumb"></span></span>
+          <span>Live</span>
+        </label>
+        <button class="pill-btn" id="btn-refresh-pv">↺ Refresh</button>
       </div>
-      <div class="modal-footer">
-        <div class="modal-footer-left">
-          <span class="save-confirm hidden" id="save-confirm">Saved!</span>
-        </div>
-        <button class="apply-btn" id="settings-save">Save Settings</button>
+    </div>
+    <div class="pv-wrap" id="pv-wrap">
+      <iframe id="preview" sandbox="allow-scripts allow-same-origin allow-forms" title="Preview"></iframe>
+      <div class="pv-placeholder" id="pv-placeholder">
+        <svg width="56" height="56" viewBox="0 0 56 56" fill="none">
+          <rect x="8" y="10" width="40" height="28" rx="3" stroke="#2d2d50" stroke-width="2"/>
+          <path d="M20 24l8 8 8-8" stroke="#2d2d50" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          <rect x="20" y="42" width="16" height="3" rx="1.5" fill="#2d2d50"/>
+          <rect x="23" y="38" width="10" height="4" fill="#2d2d50"/>
+        </svg>
+        <p>Paste HTML to see a live preview</p>
       </div>
     </div>
   </div>
 
-  <!-- ── Toast ─────────────────────────────────────────────────────────────── -->
-  <div class="toast hidden" id="toast"></div>
+</div>
 
-  <script src="renderer.js"></script>
+<!-- ══════════════════════ AI CHAT PANEL ═════════════════════════════════════ -->
+<div class="ai-panel" id="ai-panel">
+
+  <div class="ai-panel-header" id="ai-panel-toggle">
+    <div class="ai-panel-title">
+      <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><path d="M7 0C3.134 0 0 3.134 0 7s3.134 7 7 7 7-3.134 7-7S10.866 0 7 0zm.75 10.5h-1.5V6.25h1.5v4.25zm0-5.75h-1.5v-1.5h1.5v1.5z"/></svg>
+      AI Assistant
+    </div>
+    <div class="ai-panel-meta">
+      <span class="ai-thinking-badge hidden" id="ai-thinking-badge">
+        <span class="think-dot"></span><span class="think-dot"></span><span class="think-dot"></span>
+        thinking
+      </span>
+      <button class="panel-collapse-btn" id="btn-collapse-ai" title="Toggle panel">
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" id="collapse-icon">
+          <path d="M2 4l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  <div class="chat-body" id="chat-body">
+    <div class="chat-messages" id="chat-messages">
+      <div class="welcome-msg">
+        <div class="welcome-icon">
+          <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+            <rect x="3" y="3" width="10" height="10" rx="2.5" fill="#7c3aed"/>
+            <rect x="15" y="3" width="10" height="10" rx="2.5" fill="#7c3aed" opacity=".4"/>
+            <rect x="3" y="15" width="10" height="10" rx="2.5" fill="#7c3aed" opacity=".4"/>
+            <rect x="15" y="15" width="10" height="10" rx="2.5" fill="#7c3aed"/>
+          </svg>
+        </div>
+        <div class="welcome-text">
+          <strong>Senior Dev AI — Powered by Ollama (100% local, no API key)</strong>
+          <p>Give instructions in <em>English or Hindi</em>. I edit your HTML like a 10+ year developer.</p>
+          <div class="example-chips">
+            <span class="chip" data-cmd="make it mobile responsive">make it mobile responsive</span>
+            <span class="chip" data-cmd="add a smooth dark mode">add smooth dark mode</span>
+            <span class="chip" data-cmd="header ko neon purple karo">header ko neon purple karo</span>
+            <span class="chip" data-cmd="add CSS animations to buttons">add CSS animations to buttons</span>
+            <span class="chip" data-cmd="navigation fix karo aur sticky banao">navigation fix karo sticky banao</span>
+            <span class="chip" data-cmd="clean and format the code">clean &amp; format code</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="chat-input-bar">
+    <div class="chat-input-wrap" id="chat-input-wrap">
+      <div class="chat-input-prefix">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" opacity=".4"><path d="M8 1a7 7 0 100 14A7 7 0 008 1zm-.75 4.5a.75.75 0 111.5 0v4a.75.75 0 01-1.5 0v-4zm.75 7a1 1 0 110-2 1 1 0 010 2z"/></svg>
+      </div>
+      <textarea
+        id="chat-input"
+        rows="1"
+        placeholder='Type in English or Hindi… "make it dark" / "mobile responsive banao" (Enter ↵ to send)'
+        spellcheck="true"
+      ></textarea>
+    </div>
+    <div class="chat-actions">
+      <select class="model-select" id="model-select" title="Select Ollama model">
+        <option value="llama3.1:8b">llama3.1:8b</option>
+        <option value="qwen2.5-coder:7b" selected>qwen2.5-coder:7b</option>
+        <option value="mistral:7b">mistral:7b</option>
+        <option value="codellama:7b">codellama:7b</option>
+        <option value="llama3.2:3b">llama3.2:3b</option>
+        <option value="gemma2:9b">gemma2:9b</option>
+      </select>
+      <button class="send-btn" id="btn-send">
+        <span id="send-label">Send</span>
+        <span class="send-spinner hidden" id="send-spinner">
+          <span></span><span></span><span></span>
+        </span>
+        <svg id="send-icon" width="13" height="13" viewBox="0 0 13 13" fill="currentColor"><path d="M1.146 1.146a.5.5 0 01.708 0L12 11.293V5.5a.5.5 0 011 0v7a.5.5 0 01-.5.5h-7a.5.5 0 010-1h5.793L1.146 1.854a.5.5 0 010-.708z"/></svg>
+      </button>
+    </div>
+  </div>
+
+</div>
+
+<!-- ══════════════════════ COMMAND PALETTE ═══════════════════════════════════ -->
+<div class="palette-overlay hidden" id="palette-overlay">
+  <div class="palette-box">
+    <div class="palette-input-wrap">
+      <svg width="15" height="15" viewBox="0 0 15 15" fill="currentColor" opacity=".4"><path d="M6 1a5 5 0 100 10A5 5 0 006 1zm6.707 9.293l-2.56-2.56a6.5 6.5 0 10-1.414 1.414l2.56 2.56a1 1 0 001.414-1.414z"/></svg>
+      <input id="palette-input" placeholder="Search commands or type an AI instruction…" autocomplete="off" spellcheck="false">
+    </div>
+    <div class="palette-results" id="palette-results"></div>
+    <div class="palette-footer">
+      <span><kbd>↑↓</kbd> navigate</span>
+      <span><kbd>↵</kbd> select</span>
+      <span><kbd>Esc</kbd> close</span>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════ SETTINGS MODAL ═══════════════════════════════════ -->
+<div class="modal-overlay hidden" id="settings-overlay">
+  <div class="modal-box" role="dialog" aria-label="Settings">
+    <div class="modal-head">
+      <h2>Settings</h2>
+      <button class="modal-close-btn" id="modal-close">
+        <svg width="13" height="13" viewBox="0 0 13 13" fill="currentColor"><path d="M.646.646a.5.5 0 01.708 0L6.5 5.793 11.646.646a.5.5 0 01.708.708L7.207 6.5l5.147 5.146a.5.5 0 01-.708.708L6.5 7.207l-5.146 5.147a.5.5 0 01-.708-.708L5.793 6.5.646 1.354a.5.5 0 010-.708z"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div class="settings-section">
+        <div class="settings-section-title">Local AI (Ollama)</div>
+        <div class="setting-row">
+          <label>Ollama Host</label>
+          <input type="text" id="s-ollama-host" value="localhost" placeholder="localhost">
+        </div>
+        <div class="setting-row">
+          <label>Default Model</label>
+          <select id="s-default-model">
+            <option value="qwen2.5-coder:7b" selected>qwen2.5-coder:7b (best for code)</option>
+            <option value="llama3.1:8b">llama3.1:8b (best for Hindi)</option>
+            <option value="mistral:7b">mistral:7b (fast)</option>
+            <option value="codellama:7b">codellama:7b</option>
+            <option value="llama3.2:3b">llama3.2:3b (lightest)</option>
+          </select>
+        </div>
+        <div class="setting-row">
+          <label>History Limit</label>
+          <select id="s-history-limit">
+            <option value="10">10 versions</option>
+            <option value="25" selected>25 versions</option>
+            <option value="50">50 versions</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <div class="settings-section-title">Cloud API (Optional fallback)</div>
+        <div class="setting-row">
+          <label>Provider</label>
+          <select id="s-provider">
+            <option value="none" selected>None (use Ollama)</option>
+            <option value="claude">Anthropic Claude</option>
+            <option value="openai">OpenAI GPT</option>
+          </select>
+        </div>
+        <div class="setting-row">
+          <label>API Key</label>
+          <div class="apikey-row">
+            <input type="password" id="s-apikey" placeholder="Optional — only if using cloud provider" autocomplete="off">
+            <button id="s-apikey-toggle">👁</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <div class="settings-section-title">Editor</div>
+        <div class="setting-row">
+          <label>Font Size</label>
+          <select id="s-font-size">
+            <option value="12">12px</option>
+            <option value="13" selected>13px</option>
+            <option value="14">14px</option>
+            <option value="16">16px</option>
+          </select>
+        </div>
+        <div class="setting-row">
+          <label>Word Wrap</label>
+          <select id="s-word-wrap">
+            <option value="off">Off</option>
+            <option value="on" selected>On</option>
+          </select>
+        </div>
+        <div class="setting-row">
+          <label>Minimap</label>
+          <select id="s-minimap">
+            <option value="false">Hidden</option>
+            <option value="true">Visible</option>
+          </select>
+        </div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <span class="saved-msg hidden" id="saved-msg">Saved ✓</span>
+      <button class="save-btn" id="btn-save-settings">Save Settings</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════ TOAST ═════════════════════════════════════════════ -->
+<div class="toast hidden" id="toast"></div>
+
+<!-- ══════════════════════ SCRIPTS ═══════════════════════════════════════════ -->
+<script>
+  // Point Monaco loader at local node_modules
+  window.MonacoEnvironment = {
+    getWorkerUrl: function(moduleId, label) {
+      return '../node_modules/monaco-editor/min/vs/base/worker/workerMain.js'
+    }
+  }
+</script>
+<script src="../node_modules/monaco-editor/min/vs/loader.js"></script>
+<script>
+  require.config({ paths: { vs: '../node_modules/monaco-editor/min/vs' } })
+</script>
+<script src="renderer.js"></script>
+
 </body>
 </html>
