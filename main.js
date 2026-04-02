@@ -7,16 +7,11 @@ let mainWindow
 let historyFilePath
 let modelsPath
 
-// ─── node-llama-cpp state (ESM loaded lazily) ─────────────────────────────────
-let llamaLib     = null   // the imported ESM module
-let llamaEngine  = null   // getLlama() result
-let llamaModel   = null   // loaded model
-let loadedModelPath = null
+// ─── node-llama-cpp v2 (CommonJS, works with Node 18 / Electron 28) ──────────
+const { LlamaModel, LlamaContext, LlamaChatSession } = require('node-llama-cpp')
 
-async function getLlamaLib() {
-  if (!llamaLib) llamaLib = await import('node-llama-cpp')
-  return llamaLib
-}
+let llamaModel      = null   // LlamaModel instance
+let loadedModelPath = null
 
 // ─── Available models (first is default) ─────────────────────────────────────
 const MODELS = [
@@ -46,30 +41,16 @@ function modelExists(modelFile) {
   try { return fs.existsSync(modelFilePath(modelFile)) } catch { return false }
 }
 
-// ─── Engine init (once, reused) ───────────────────────────────────────────────
-async function initEngine() {
-  if (llamaEngine) return
-  const { getLlama } = await getLlamaLib()
-  // auto-detects Metal on Apple Silicon, falls back to CPU
-  llamaEngine = await getLlama({ progressLogs: false })
-  console.log('[Diphoria] LLaMA engine ready — backend:', llamaEngine.gpu ?? 'cpu')
-}
-
-// ─── Load a GGUF model ────────────────────────────────────────────────────────
+// ─── Load a GGUF model (v2 API — sync constructor, works with Node 18) ───────
 async function loadModel(modelFile) {
   const mp = modelFilePath(modelFile)
   if (!fs.existsSync(mp)) return false
   if (loadedModelPath === mp && llamaModel) return true  // already loaded
 
-  await initEngine()
+  llamaModel      = null
+  loadedModelPath = null
 
-  if (llamaModel) {
-    try { await llamaModel.dispose() } catch {}
-    llamaModel = null
-    loadedModelPath = null
-  }
-
-  llamaModel = await llamaEngine.loadModel({ modelPath: mp })
+  llamaModel      = new LlamaModel({ modelPath: mp })
   loadedModelPath = mp
   console.log('[Diphoria] Model loaded:', modelFile)
   return true
@@ -239,25 +220,19 @@ ipcMain.on('ai-stream-start', async (event, { html, instruction, systemPrompt })
 
   let fullText = ''
   try {
-    const { LlamaChatSession } = await getLlamaLib()
-    const ctxSize = Math.min(llamaModel.trainContextSize || 4096, PERF.contextSize)
-    const context = await llamaModel.createContext({ contextSize: ctxSize })
-
-    const session = new LlamaChatSession({
-      contextSequence: context.getSequence(),
-      systemPrompt:    SYSTEM,
-    })
+    // v2 API: LlamaContext + LlamaChatSession (CJS, Node 18 compatible)
+    const context = new LlamaContext({ model: llamaModel, contextSize: PERF.contextSize })
+    const session = new LlamaChatSession({ context, systemPrompt: SYSTEM })
 
     await session.prompt(`INSTRUCTION: ${instruction}\n\nHTML:\n${html}`, {
       maxTokens:   PERF.maxTokens,
       temperature: PERF.temperature,
-      onTextChunk(text) {
+      onToken(chunk) {
+        const text = llamaModel.detokenize(chunk)
         fullText += text
         wc.send('ai-stream-chunk', text)
       },
     })
-
-    try { await context.dispose() } catch {}
 
     wc.send('ai-stream-done', { html: fullText, raw: fullText })
   } catch (e) {
