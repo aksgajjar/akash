@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline';">
+  <title>HTML AI Editor</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- ── Top Bar ─────────────────────────────────────────────────────────── -->
+  <header class="topbar">
+    <div class="topbar-left">
+      <div class="app-logo">
+        <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+          <rect x="2" y="2" width="7" height="7" rx="1.5" fill="#6366f1"/>
+          <rect x="11" y="2" width="7" height="7" rx="1.5" fill="#6366f1" opacity="0.5"/>
+          <rect x="2" y="11" width="7" height="7" rx="1.5" fill="#6366f1" opacity="0.5"/>
+          <rect x="11" y="11" width="7" height="7" rx="1.5" fill="#6366f1"/>
+        </svg>
+      </div>
+      <span class="app-title">HTML AI Editor</span>
+      <span class="file-name" id="file-name"></span>
+    </div>
+
+    <div class="topbar-center">
+      <span class="status-msg" id="status-msg"></span>
+    </div>
+
+    <div class="topbar-right">
+      <button class="topbar-btn" id="btn-open" title="Open HTML file (Cmd+O)">
+        <svg width="15" height="15" viewBox="0 0 15 15" fill="currentColor">
+          <path d="M2 3.5A1.5 1.5 0 013.5 2h3.25a.5.5 0 01.354.146l1.25 1.25A.5.5 0 018.708 3.5H11.5A1.5 1.5 0 0113 5v6.5A1.5 1.5 0 0111.5 13h-8A1.5 1.5 0 012 11.5v-8zm5.5-1H3.5a.5.5 0 00-.5.5v8a.5.5 0 00.5.5h8a.5.5 0 00.5-.5V5a.5.5 0 00-.5-.5H8.708L7.5 3.292V2.5z"/>
+        </svg>
+        Open
+      </button>
+      <button class="topbar-btn" id="btn-save" title="Save HTML file (Cmd+S)">
+        <svg width="15" height="15" viewBox="0 0 15 15" fill="currentColor">
+          <path d="M3 1.5A1.5 1.5 0 011.5 3v9A1.5 1.5 0 003 13.5h9a1.5 1.5 0 001.5-1.5V4.5a.5.5 0 00-.146-.354l-3-3A.5.5 0 0010 1H3.5A1.5 1.5 0 003 1.5zm7 8.5H5a.5.5 0 010-1h5a.5.5 0 010 1zm0-2H5a.5.5 0 010-1h5a.5.5 0 010 1zm-3-5a.5.5 0 01.5-.5h2a.5.5 0 010 1H7.5A.5.5 0 017 3z"/>
+        </svg>
+        Save
+      </button>
+      <div class="topbar-divider"></div>
+      <button class="topbar-btn topbar-btn-icon" id="btn-settings" title="Settings">
+        <svg width="15" height="15" viewBox="0 0 15 15" fill="currentColor">
+          <path d="M7.5 1a6.5 6.5 0 100 13A6.5 6.5 0 007.5 1zm0 2a4.5 4.5 0 110 9 4.5 4.5 0 010-9zm0 1.5a3 3 0 100 6 3 3 0 000-6z" opacity="0.3"/>
+          <path d="M7.5 5a2.5 2.5 0 100 5 2.5 2.5 0 000-5zm0 1a1.5 1.5 0 110 3 1.5 1.5 0 010-3z"/>
+          <path d="M6.935.462A.5.5 0 017.5 0h0a.5.5 0 01.5.45l.09.9a5.5 5.5 0 011.277.528l.762-.524a.5.5 0 01.638.073l.354.354a.5.5 0 01.073.638l-.524.762a5.5 5.5 0 01.528 1.277l.9.09A.5.5 0 0112 5v.5a.5.5 0 01-.45.5l-.9.09a5.5 5.5 0 01-.528 1.277l.524.762a.5.5 0 01-.073.638l-.354.354a.5.5 0 01-.638.073l-.762-.524a5.5 5.5 0 01-1.277.528l-.09.9A.5.5 0 017.5 10h0a.5.5 0 01-.5-.45l-.09-.9a5.5 5.5 0 01-1.277-.528l-.762.524a.5.5 0 01-.638-.073l-.354-.354a.5.5 0 01-.073-.638l.524-.762A5.5 5.5 0 013.802 6.1l-.9-.09A.5.5 0 012.5 5.5V5a.5.5 0 01.45-.5l.9-.09A5.5 5.5 0 014.378 3.133l-.524-.762a.5.5 0 01.073-.638l.354-.354a.5.5 0 01.638-.073l.762.524A5.5 5.5 0 016.958 1.36l.09-.9z"/>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- ── Main: Editor + Preview ────────────────────────────────────────────── -->
+  <main class="workspace">
+
+    <!-- Left: Editor panel -->
+    <section class="panel editor-panel" id="editor-panel">
+      <div class="panel-header">
+        <span class="panel-label">HTML Source</span>
+        <div class="panel-header-actions">
+          <button class="pill-btn" id="btn-format">Format</button>
+          <button class="pill-btn" id="btn-clear">Clear</button>
+          <div class="history-wrap">
+            <button class="pill-btn" id="btn-history">History <span class="history-count" id="history-count"></span></button>
+            <div class="history-panel hidden" id="history-panel">
+              <div class="history-header">
+                <span>Version History</span>
+                <button class="history-clear-btn" id="btn-clear-history">Clear all</button>
+              </div>
+              <div class="history-list" id="history-list"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <textarea id="editor" spellcheck="false" autocorrect="off" autocapitalize="off" placeholder="Paste your HTML here, or click Open to load a file..."></textarea>
+      <div class="char-count" id="char-count">0 chars</div>
+    </section>
+
+    <!-- Resize handle -->
+    <div class="resize-handle" id="resize-handle" title="Drag to resize"></div>
+
+    <!-- Right: Preview panel -->
+    <section class="panel preview-panel" id="preview-panel">
+      <div class="panel-header">
+        <span class="panel-label">Live Preview</span>
+        <div class="panel-header-actions">
+          <button class="pill-btn" id="btn-refresh">Refresh</button>
+          <label class="toggle-wrap" title="Auto-refresh preview as you type">
+            <input type="checkbox" id="toggle-autorefresh" checked>
+            <span class="toggle-track"><span class="toggle-thumb"></span></span>
+            <span class="toggle-label">Auto</span>
+          </label>
+        </div>
+      </div>
+      <div class="preview-container">
+        <iframe id="preview" sandbox="allow-scripts allow-same-origin allow-forms" title="HTML Preview"></iframe>
+        <div class="preview-empty" id="preview-empty">
+          <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
+            <rect x="8" y="8" width="32" height="32" rx="4" stroke="#3d3d5c" stroke-width="2"/>
+            <path d="M16 20l6 6-6 6M26 32h6" stroke="#3d3d5c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <p>Preview will appear here</p>
+          <small>Paste HTML in the editor to see it rendered</small>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ── Bottom: AI Instruction Bar ────────────────────────────────────────── -->
+  <footer class="ai-bar">
+    <div class="ai-bar-inner">
+      <div class="ai-input-wrap">
+        <div class="ai-input-icon">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" opacity="0.5">
+            <path d="M8 1a7 7 0 100 14A7 7 0 008 1zm0 1.5a5.5 5.5 0 110 11 5.5 5.5 0 010-11zm0 2a.75.75 0 100 1.5.75.75 0 000-1.5zm-.75 2.5a.75.75 0 011.5 0v3a.75.75 0 01-1.5 0V7z"/>
+          </svg>
+        </div>
+        <textarea
+          id="instruction"
+          rows="1"
+          spellcheck="true"
+          placeholder='Tell the AI what to do: "fix layout", "make mobile responsive", "remove the header", "clean and format code", "add dark mode"...'
+        ></textarea>
+      </div>
+
+      <div class="ai-bar-actions">
+        <div class="model-badge" id="model-badge" title="Click Settings to change">claude-sonnet-4-6</div>
+        <button class="apply-btn" id="btn-apply">
+          <span class="apply-btn-text" id="apply-btn-text">Apply Changes</span>
+          <span class="apply-btn-spinner hidden" id="apply-spinner">
+            <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+          </span>
+          <svg class="apply-btn-icon" width="14" height="14" viewBox="0 0 14 14" fill="currentColor">
+            <path d="M7 1L13 7L7 13M1 7h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+  </footer>
+
+  <!-- ── Settings Modal ────────────────────────────────────────────────────── -->
+  <div class="modal-backdrop hidden" id="modal-backdrop">
+    <div class="modal" role="dialog" aria-modal="true" aria-label="Settings">
+      <div class="modal-header">
+        <h2>Settings</h2>
+        <button class="modal-close" id="modal-close" aria-label="Close settings">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor">
+            <path d="M1 1l12 12M13 1L1 13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" fill="none"/>
+          </svg>
+        </button>
+      </div>
+      <div class="modal-body">
+
+        <div class="setting-row">
+          <label class="setting-label" for="setting-provider">AI Provider</label>
+          <select class="setting-select" id="setting-provider">
+            <option value="claude">Anthropic Claude</option>
+            <option value="openai">OpenAI GPT</option>
+          </select>
+        </div>
+
+        <div class="setting-row" id="claude-models-row">
+          <label class="setting-label" for="setting-model-claude">Claude Model</label>
+          <select class="setting-select" id="setting-model-claude">
+            <option value="claude-sonnet-4-6">claude-sonnet-4-6 — balanced (recommended)</option>
+            <option value="claude-opus-4-6">claude-opus-4-6 — most powerful</option>
+            <option value="claude-haiku-4-5-20251001">claude-haiku-4-5 — fastest &amp; cheapest</option>
+          </select>
+        </div>
+
+        <div class="setting-row hidden" id="openai-models-row">
+          <label class="setting-label" for="setting-model-openai">OpenAI Model</label>
+          <select class="setting-select" id="setting-model-openai">
+            <option value="gpt-4o">gpt-4o — recommended</option>
+            <option value="gpt-4o-mini">gpt-4o-mini — faster &amp; cheaper</option>
+            <option value="gpt-4-turbo">gpt-4-turbo</option>
+          </select>
+        </div>
+
+        <div class="setting-row">
+          <label class="setting-label" for="setting-apikey">API Key</label>
+          <div class="apikey-wrap">
+            <input
+              class="setting-input"
+              type="password"
+              id="setting-apikey"
+              placeholder="Paste your API key here..."
+              autocomplete="off"
+              spellcheck="false"
+            >
+            <button class="apikey-toggle" id="apikey-toggle" title="Show/hide key">
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" id="eye-icon">
+                <path d="M7 2C3.5 2 1 7 1 7s2.5 5 6 5 6-5 6-5-2.5-5-6-5zm0 8a3 3 0 110-6 3 3 0 010 6zm0-4.5a1.5 1.5 0 100 3 1.5 1.5 0 000-3z"/>
+              </svg>
+            </button>
+          </div>
+          <div class="setting-hint" id="provider-hint">
+            Get your key at: console.anthropic.com
+          </div>
+        </div>
+
+        <div class="setting-row">
+          <label class="setting-label" for="setting-history-limit">Keep History (versions)</label>
+          <select class="setting-select" id="setting-history-limit">
+            <option value="10">10 versions</option>
+            <option value="20" selected>20 versions</option>
+            <option value="50">50 versions</option>
+          </select>
+        </div>
+
+      </div>
+      <div class="modal-footer">
+        <div class="modal-footer-left">
+          <span class="save-confirm hidden" id="save-confirm">Saved!</span>
+        </div>
+        <button class="apply-btn" id="settings-save">Save Settings</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Toast ─────────────────────────────────────────────────────────────── -->
+  <div class="toast hidden" id="toast"></div>
+
+  <script src="renderer.js"></script>
+</body>
+</html>

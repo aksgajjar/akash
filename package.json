@@ -1,0 +1,16 @@
+{
+  "name": "html-ai-editor",
+  "version": "1.0.0",
+  "description": "Personal AI-powered HTML editor desktop app",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --enable-logging"
+  },
+  "devDependencies": {
+    "electron": "^28.3.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
