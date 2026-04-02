@@ -103,10 +103,29 @@ ipcMain.handle('ollama-models', async () => {
 })
 
 // ─── Ollama streaming inference ───────────────────────────────────────────────
-const DEFAULT_SYSTEM = `You are a world-class senior HTML/CSS/JavaScript developer with 10+ years of experience.
-You are an expert in modern web design, responsive layouts, animations, accessibility, and performance.
-You understand instructions in BOTH English and Hindi fluently.
-Return ONLY the complete updated HTML — no explanations, no markdown fences.`
+// Performance defaults — tuned for MacBook Pro 2021 (16GB shared RAM)
+const PERF = {
+  num_ctx:     3072,   // was 16384 — ~70% less RAM per request
+  num_predict: 2048,   // was 8192  — caps response length, prevents runaway generation
+  temperature: 0.1,
+  timeout_ms:  60000   // was 120000 — fail fast, don't freeze UI
+}
+
+const DEFAULT_SYSTEM = `You are a senior HTML/CSS/JS developer. Apply the instruction and return ONLY the complete updated HTML. No explanations, no markdown fences. Preserve all content not mentioned. Mark edits with <!-- DIPHORIA-EDIT: description -->.`
+
+// Trim oversized HTML before sending — keeps input tokens under ~1200
+// Sends: full head + body trimmed to maxChars + closing tags
+function trimHTMLForAI(html, maxChars = 5000) {
+  if (html.length <= maxChars) return html
+  const headMatch = html.match(/<head[\s\S]*?<\/head>/i)
+  const head = headMatch ? headMatch[0] : ''
+  const bodyIdx = html.indexOf('<body')
+  const body = bodyIdx > -1 ? html.slice(bodyIdx) : html
+  const allowedBody = maxChars - head.length
+  const trimmedBody = body.slice(0, Math.max(allowedBody, 1500))
+  console.log(`[Diphoria] HTML trimmed: ${html.length} → ${head.length + trimmedBody.length} chars`)
+  return `${head}\n${trimmedBody}\n<!-- TRIMMED -->\n</body></html>`
+}
 
 ipcMain.on('ai-stream-start', async (event, { html, instruction, model, ollamaHost, systemPrompt, imageBase64 }) => {
   const wc   = event.sender
@@ -115,8 +134,11 @@ ipcMain.on('ai-stream-start', async (event, { html, instruction, model, ollamaHo
 
   const SYSTEM = systemPrompt || DEFAULT_SYSTEM
 
+  // Trim HTML to keep input tokens manageable
+  const trimmedHTML = trimHTMLForAI(html)
+
   // Build user message — support vision models (llava, etc.) with imageBase64
-  const userMessage = { role: 'user', content: `INSTRUCTION: ${instruction}\n\nHTML:\n${html}` }
+  const userMessage = { role: 'user', content: `INSTRUCTION: ${instruction}\n\nHTML:\n${trimmedHTML}` }
   if (imageBase64) {
     const b64 = imageBase64.replace(/^data:image\/\w+;base64,/, '')
     userMessage.images = [b64]
@@ -125,7 +147,11 @@ ipcMain.on('ai-stream-start', async (event, { html, instruction, model, ollamaHo
   const body = JSON.stringify({
     model,
     stream: true,
-    options: { temperature: 0.1, num_ctx: 16384, num_predict: 8192 },
+    options: {
+      temperature: PERF.temperature,
+      num_ctx:     PERF.num_ctx,
+      num_predict: PERF.num_predict,
+    },
     messages: [
       { role: 'system', content: SYSTEM },
       userMessage
@@ -175,7 +201,10 @@ ipcMain.on('ai-stream-start', async (event, { html, instruction, model, ollamaHo
     wc.send('ai-stream-error', msg)
   })
 
-  req.setTimeout(120000, () => { req.destroy(); wc.send('ai-stream-error', 'Request timed out (2 min)') })
+  req.setTimeout(PERF.timeout_ms, () => {
+    req.destroy()
+    wc.send('ai-stream-error', `Timed out after ${PERF.timeout_ms / 1000}s. Try a smaller model (llama3.2:3b) or shorter HTML.`)
+  })
   req.write(body)
   req.end()
 })

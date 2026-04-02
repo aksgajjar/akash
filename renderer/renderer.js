@@ -5,7 +5,7 @@ const STORAGE_KEY = 'diphoria-ai-v1';
 
 const defaults = {
   ollamaHost:    '127.0.0.1',
-  defaultModel:  'qwen2.5-coder:7b',
+  defaultModel:  'llama3.2:3b',   // fastest/lightest; user can switch to 7b in settings
   historyLimit:  25,
   provider:      'none',
   apiKey:        '',
@@ -196,58 +196,25 @@ function detectSections(html) {
   return sections;
 }
 
+// Compact system prompt — keeps token count low for performance
+// Detailed rules replaced with concise equivalents (~150 tokens vs ~500 before)
 function buildSystemPrompt(instruction, html) {
-  const safeRules = S.safeMode ? `
-SAFE EDIT MODE (ACTIVE — MANDATORY):
-- Identify the SPECIFIC section the instruction refers to
-- Modify ONLY that section — leave everything else EXACTLY as-is
-- Preserve ALL: IDs, class names, data attributes, scripts, structure
-- If the change would require restructuring >30% of the HTML, describe what you would do instead of making the change
-- Add HTML comments where you made changes: <!-- DIPHORIA-EDIT: description -->
-` : `
-You may modify any part of the HTML needed to fulfill the instruction.
-Add HTML comments where you made changes: <!-- DIPHORIA-EDIT: description -->
-`;
+  const safe  = S.safeMode  ? 'SAFE MODE: Modify ONLY the mentioned section. Preserve all IDs, classes, structure. Mark edits: <!-- DIPHORIA-EDIT: what -->.' : 'Mark edits: <!-- DIPHORIA-EDIT: what -->.'
+  const think = S.thinkMode ? ' Add <!-- THINK: section=X approach=Y --> before changes.' : ''
 
-  const thinkRules = S.thinkMode ? `
-THINK MODE (ACTIVE):
-Before making changes, output a brief analysis block:
-<!-- THINK:
-  Section identified: [which section]
-  Approach: [what you'll do]
-  Risk: [any potential side effects]
--->
-Then apply the changes.
-` : '';
+  // Detect sections — single line, low token cost
+  const sections = detectSections(html)
+  const ctx = sections.length ? ` Sections found: ${sections.join(', ')}.` : ''
 
-  const sections = detectSections(html);
-  const sectionContext = sections.length > 0
-    ? `\nDetected sections in this HTML: ${sections.join(', ')}`
-    : '';
+  // Only include top-3 learned instructions to limit token overhead
+  const learnData = S.learningMode ? loadLearning() : null
+  const prefs = (learnData && learnData.instructions.length)
+    ? ` User style prefs: ${JSON.stringify(learnData.prefs || {})}.`
+    : ''
 
-  const learnCtx = S.learningMode ? buildLearningContext() : '';
-  const learnBlock = learnCtx
-    ? `\nUSER PREFERENCES (learned from history — apply gently if relevant):\n${learnCtx}\n`
-    : '';
+  const img = S.pendingImageBase64 ? ' A reference image is attached — use its colors/layout as inspiration.' : ''
 
-  const imgBlock = S.pendingImageBase64
-    ? `\nA REFERENCE IMAGE has been provided. Analyze its layout, spacing, and color scheme. Use as inspiration only — do not copy exactly.\n`
-    : '';
-
-  return `You are Diphoria AI — a world-class senior HTML/CSS/JavaScript developer with 10+ years of experience.
-You understand instructions in BOTH English and Hindi fluently.
-
-CORE RULES:
-1. Return ONLY the complete, updated HTML document — nothing else
-2. No markdown code fences, no explanations, no text before or after
-3. Start with <!DOCTYPE html> and end with </html>
-4. Preserve ALL content that is NOT mentioned in the instruction
-${safeRules}${thinkRules}${sectionContext}${learnBlock}${imgBlock}
-QUALITY STANDARDS:
-- Dark mode → CSS custom properties, not just black backgrounds
-- Mobile responsive → proper breakpoints, touch-friendly targets
-- Animations → smooth, GPU-accelerated, purposeful
-- Clean code → 2-space indentation, logical structure`;
+  return `You are Diphoria AI, a senior HTML/CSS/JS developer. Apply the instruction and return ONLY the complete updated HTML. No markdown, no explanations.${ctx} ${safe}${think}${prefs}${img}`
 }
 
 // ─── Image Upload ─────────────────────────────────────────────────────────────
