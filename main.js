@@ -120,7 +120,10 @@ function createWindow() {
   })
 
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'))
-  mainWindow.once('ready-to-show', () => mainWindow.show())
+  mainWindow.once('ready-to-show', () => {
+    mainWindow.show()
+    mainWindow.webContents.openDevTools()  // show console for debugging
+  })
 
   const userData  = app.getPath('userData')
   historyFilePath = path.join(userData, 'diphoria-ai-history.json')

@@ -1034,26 +1034,35 @@ function toggleDiff() {
 // ─── CodeMirror 5 Initialization ─────────────────────────────────────────────
 function initCodeMirror() {
   const container = $('cm-editor');
-  if (!container) { console.warn('[Diphoria] #cm-editor not found'); return; }
+  if (!container) { console.error('[Diphoria] #cm-editor not found — check index.html'); return; }
 
-  const editor = CodeMirror(container, {
-    value:        '',
-    mode:         'htmlmixed',
-    theme:        'dracula',
-    lineNumbers:  true,
-    lineWrapping: S.settings.wordWrap !== 'off',
-    tabSize:      2,
-    indentWithTabs: false,
-    autoCloseTags:  true,
-    matchBrackets:  true,
-    autofocus:    false,
-  });
+  let editor;
+  try {
+    editor = CodeMirror(container, {
+      value:          '',
+      mode:           'htmlmixed',
+      theme:          'dracula',
+      lineNumbers:    true,
+      lineWrapping:   S.settings.wordWrap !== 'off',
+      tabSize:        2,
+      indentWithTabs: false,
+      autoCloseTags:  true,
+      matchBrackets:  true,
+      autofocus:      false,
+    });
+  } catch (e) {
+    console.error('[Diphoria] CodeMirror init failed:', e);
+    return;
+  }
 
   // Apply font size
   const fs = S.settings.fontSize || 13;
   container.style.fontSize = fs + 'px';
 
   window._cmEditor = editor;
+
+  // Force correct height after first layout paint
+  requestAnimationFrame(() => { editor.refresh(); });
 
   // Cursor → line-info
   editor.on('cursorActivity', () => {
@@ -1254,7 +1263,7 @@ function wireEvents() {
 }
 
 // ─── Boot ─────────────────────────────────────────────────────────────────────
-(function boot() {
+document.addEventListener('DOMContentLoaded', function boot() {
   loadSettings();
 
   S.safeMode     = S.settings.safeMode     !== false;
@@ -1283,4 +1292,4 @@ function wireEvents() {
     setInterval(checkModelStatus, 30000);
     showWelcome();
   });
-})();
+});
