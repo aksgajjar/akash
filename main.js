@@ -23,14 +23,14 @@ const MODELS = [
   {
     id:       'qwen2.5-coder-1.5b',
     file:     'qwen2.5-coder-1.5b-instruct-q4_k_m.gguf',
-    uri:      'hf:Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF:qwen2.5-coder-1.5b-instruct-q4_k_m.gguf',
+    uri:      'https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF/resolve/main/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf',
     label:    'Qwen2.5-Coder 1.5B — fast, code-focused',
     sizeMB:   1100,
   },
   {
     id:       'phi3.5-mini',
     file:     'phi-3.5-mini-instruct-q4_k_m.gguf',
-    uri:      'hf:bartowski/Phi-3.5-mini-instruct-GGUF:Phi-3.5-mini-instruct-Q4_K_M.gguf',
+    uri:      'https://huggingface.co/bartowski/Phi-3.5-mini-instruct-GGUF/resolve/main/Phi-3.5-mini-instruct-Q4_K_M.gguf',
     label:    'Phi-3.5 Mini — advanced reasoning, 3.8B',
     sizeMB:   2200,
   },
@@ -76,27 +76,62 @@ async function loadModel(modelFile) {
 }
 
 // ─── Download a model from Hugging Face ──────────────────────────────────────
+function httpsGetFollow(url, onResponse) {
+  https.get(url, { headers: { 'User-Agent': 'Diphoria-AI/3.0' } }, res => {
+    if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+      httpsGetFollow(res.headers.location, onResponse)
+    } else {
+      onResponse(res)
+    }
+  }).on('error', onResponse)
+}
+
 async function downloadModel(wc, modelInfo) {
-  const { createModelDownloader } = await getLlamaLib()
   if (!fs.existsSync(modelsPath)) fs.mkdirSync(modelsPath, { recursive: true })
 
   wc.send('model-download-start', { label: modelInfo.label, sizeMB: modelInfo.sizeMB })
-  console.log('[Diphoria] Downloading model:', modelInfo.id)
+  console.log('[Diphoria] Downloading model:', modelInfo.id, 'from', modelInfo.uri)
 
-  const downloader = await createModelDownloader({
-    modelUri: modelInfo.uri,
-    dirPath:  modelsPath,
-    onProgress({ downloadedSize, totalSize }) {
-      const pct = totalSize > 0 ? Math.round((downloadedSize / totalSize) * 100) : 0
-      wc.send('model-download-progress', {
-        pct,
-        downloadedMB: (downloadedSize / 1048576).toFixed(0),
-        totalMB:      (totalSize / 1048576).toFixed(0),
+  const destPath = modelFilePath(modelInfo.file)
+
+  await new Promise((resolve, reject) => {
+    httpsGetFollow(modelInfo.uri, res => {
+      if (res instanceof Error) {
+        console.error('[Diphoria] Download error:', res)
+        return reject(res)
+      }
+      if (res.statusCode !== 200) {
+        return reject(new Error(`HTTP ${res.statusCode} for ${modelInfo.uri}`))
+      }
+
+      const totalSize = parseInt(res.headers['content-length'] || '0', 10)
+      let downloadedSize = 0
+
+      const fileStream = fs.createWriteStream(destPath)
+      res.on('data', chunk => {
+        downloadedSize += chunk.length
+        const pct = totalSize > 0 ? Math.round((downloadedSize / totalSize) * 100) : 0
+        wc.send('model-download-progress', {
+          pct,
+          downloadedMB: (downloadedSize / 1048576).toFixed(0),
+          totalMB:      (totalSize  / 1048576).toFixed(0),
+        })
       })
-    },
+      res.pipe(fileStream)
+      fileStream.on('finish', () => { fileStream.close(); resolve() })
+      fileStream.on('error', err => {
+        console.error('[Diphoria] File write error:', err)
+        fs.unlink(destPath, () => {})
+        reject(err)
+      })
+      res.on('error', err => {
+        console.error('[Diphoria] Download stream error:', err)
+        fs.unlink(destPath, () => {})
+        reject(err)
+      })
+    })
   })
 
-  await downloader.download()
   console.log('[Diphoria] Download complete:', modelInfo.file)
   wc.send('model-download-done', { file: modelInfo.file })
 }
