@@ -2,9 +2,66 @@ const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron')
 const path  = require('path')
 const fs    = require('fs')
 const http  = require('http')
+const { spawn, execSync } = require('child_process')
 
 let mainWindow
 let historyFilePath
+let ollamaProcess = null   // track auto-spawned ollama
+
+// ─── Auto-start Ollama ────────────────────────────────────────────────────────
+// Called on app launch AND whenever health check fails.
+// Tries: 1) brew services  2) direct spawn  3) open Ollama.app
+function ensureOllamaRunning() {
+  // Check if already reachable first
+  const probe = http.get('http://127.0.0.1:11434/api/tags', (res) => {
+    if (res.statusCode === 200) return  // already up, do nothing
+    startOllama()
+  })
+  probe.on('error', () => startOllama())
+  probe.setTimeout(2000, () => { probe.destroy(); startOllama() })
+}
+
+function startOllama() {
+  if (ollamaProcess) return  // already spawned by us, don't double-spawn
+
+  // 1. Try brew services (most reliable — runs as background service)
+  try {
+    execSync('brew services start ollama 2>/dev/null', { timeout: 5000 })
+    console.log('[Diphoria] Ollama started via brew services')
+    return
+  } catch {}
+
+  // 2. Try Ollama.app (GUI install)
+  try {
+    execSync('open -a Ollama 2>/dev/null', { timeout: 3000 })
+    console.log('[Diphoria] Opened Ollama.app')
+    return
+  } catch {}
+
+  // 3. Direct spawn — find ollama binary
+  const candidates = [
+    '/usr/local/bin/ollama',
+    '/opt/homebrew/bin/ollama',
+    '/opt/homebrew/opt/ollama/bin/ollama',
+    `${process.env.HOME}/.ollama/ollama`,
+  ]
+  const binary = candidates.find(p => { try { return fs.existsSync(p) } catch { return false } })
+
+  if (binary) {
+    ollamaProcess = spawn(binary, ['serve'], {
+      detached: true,
+      stdio:    'ignore',
+      env:      { ...process.env, OLLAMA_FLASH_ATTENTION: '1' }
+    })
+    ollamaProcess.unref()
+    console.log('[Diphoria] Ollama spawned from:', binary)
+  } else {
+    console.warn('[Diphoria] Could not find ollama binary — please run: brew install ollama')
+  }
+}
+
+// On app quit, don't kill Ollama — it may be used elsewhere
+app.on('will-quit', () => { ollamaProcess = null })
 
 // ─── Window ───────────────────────────────────────────────────────────────────
 function createWindow() {
@@ -28,6 +85,9 @@ function createWindow() {
   mainWindow.once('ready-to-show', () => mainWindow.show())
 
   historyFilePath = path.join(app.getPath('userData'), 'diphoria-ai-history.json')
+
+  // Auto-start Ollama immediately when window opens
+  ensureOllamaRunning()
 }
 
 app.whenReady().then(createWindow)
@@ -65,7 +125,8 @@ ipcMain.handle('ollama-check', async () => {
     })
 
     req.on('error', (err) => {
-      console.log('[Diphoria] Ollama connection error:', err.message)
+      console.log('[Diphoria] Ollama offline:', err.message, '— auto-starting...')
+      ensureOllamaRunning()   // kick-start automatically
       done({ ok: false })
     })
 
