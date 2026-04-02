@@ -4,7 +4,7 @@
 const STORAGE_KEY = 'diphoria-ai-v1';
 
 const defaults = {
-  ollamaHost:    'localhost',
+  ollamaHost:    '127.0.0.1',
   defaultModel:  'qwen2.5-coder:7b',
   historyLimit:  25,
   provider:      'none',
@@ -325,14 +325,21 @@ async function checkOllama() {
   const dot   = $('status-dot');
   const label = $('status-label');
   try {
-    const ok = await window.api.ollamaCheck();
-    if (dot)   { dot.classList.toggle('ok', !!ok); dot.classList.toggle('err', !ok); }
-    if (label) label.textContent = ok ? 'Ollama running' : 'Ollama offline';
-    if (ok) {
-      const models = await window.api.ollamaModels();
-      populateModelSelects(models || []);
+    // ollamaCheck now returns { ok: bool, models: string[] } — never a plain bool
+    const result = await window.api.ollamaCheck();
+    const isOk   = result && result.ok === true;
+    console.log('[Diphoria] Ollama status:', result);
+    if (dot)   { dot.classList.toggle('ok', isOk); dot.classList.toggle('err', !isOk); }
+    if (label) label.textContent = isOk ? 'Ollama online' : 'Ollama offline';
+    if (isOk) {
+      // result.models already included — no second request needed
+      const modelNames = (result.models && result.models.length)
+        ? result.models
+        : (await window.api.ollamaModels().catch(() => ({ models: [] }))).models || [];
+      populateModelSelects(modelNames);
     }
-  } catch {
+  } catch (e) {
+    console.error('[Diphoria] checkOllama error:', e);
     if (dot)   { dot.classList.remove('ok'); dot.classList.add('err'); }
     if (label) label.textContent = 'Ollama offline';
   }

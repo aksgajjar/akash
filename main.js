@@ -35,32 +35,70 @@ app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(
 app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow() })
 
 // ─── Ollama health check ──────────────────────────────────────────────────────
+// Always use 127.0.0.1 — "localhost" can resolve to ::1 (IPv6) on some Macs
+// Hit /api/tags which returns JSON and confirms Ollama is actually ready
 ipcMain.handle('ollama-check', async () => {
   return new Promise((resolve) => {
-    const req = http.get('http://localhost:11434/', (res) => {
-      resolve({ ok: true, status: res.statusCode })
-    })
-    req.on('error', () => resolve({ ok: false }))
-    req.setTimeout(3000, () => { req.destroy(); resolve({ ok: false }) })
-  })
-})
+    console.log('[Diphoria] Checking Ollama at http://127.0.0.1:11434/api/tags')
+    let settled = false
+    const done = (result) => {
+      if (settled) return
+      settled = true
+      console.log('[Diphoria] Ollama check result:', result)
+      resolve(result)
+    }
 
-// ─── Ollama list models ───────────────────────────────────────────────────────
-ipcMain.handle('ollama-models', async () => {
-  return new Promise((resolve) => {
-    const req = http.get('http://localhost:11434/api/tags', (res) => {
+    const req = http.get('http://127.0.0.1:11434/api/tags', (res) => {
       let data = ''
       res.on('data', c => data += c)
       res.on('end', () => {
         try {
           const parsed = JSON.parse(data)
-          resolve({ ok: true, models: (parsed.models || []).map(m => m.name) })
+          const models = (parsed.models || []).map(m => m.name)
+          done({ ok: true, models })
         } catch {
-          resolve({ ok: false, models: [] })
+          // Got a response but couldn't parse — Ollama is still reachable
+          done({ ok: true, models: [] })
         }
       })
+      res.on('error', () => done({ ok: false }))
     })
-    req.on('error', () => resolve({ ok: false, models: [] }))
+
+    req.on('error', (err) => {
+      console.log('[Diphoria] Ollama connection error:', err.message)
+      done({ ok: false })
+    })
+
+    // Hard timeout — 3 seconds max
+    req.setTimeout(3000, () => {
+      console.log('[Diphoria] Ollama check timed out')
+      req.destroy()
+      done({ ok: false })
+    })
+  })
+})
+
+// ─── Ollama list models — reuses check result, no second request needed ───────
+ipcMain.handle('ollama-models', async () => {
+  return new Promise((resolve) => {
+    let settled = false
+    const done = (result) => { if (!settled) { settled = true; resolve(result) } }
+
+    const req = http.get('http://127.0.0.1:11434/api/tags', (res) => {
+      let data = ''
+      res.on('data', c => data += c)
+      res.on('end', () => {
+        try {
+          const parsed = JSON.parse(data)
+          done({ ok: true, models: (parsed.models || []).map(m => m.name) })
+        } catch {
+          done({ ok: false, models: [] })
+        }
+      })
+      res.on('error', () => done({ ok: false, models: [] }))
+    })
+    req.on('error', () => done({ ok: false, models: [] }))
+    req.setTimeout(3000, () => { req.destroy(); done({ ok: false, models: [] }) })
   })
 })
 
@@ -72,7 +110,7 @@ Return ONLY the complete updated HTML — no explanations, no markdown fences.`
 
 ipcMain.on('ai-stream-start', async (event, { html, instruction, model, ollamaHost, systemPrompt, imageBase64 }) => {
   const wc   = event.sender
-  const host = ollamaHost || 'localhost'
+  const host = (ollamaHost && ollamaHost !== 'localhost') ? ollamaHost : '127.0.0.1'
   const port = 11434
 
   const SYSTEM = systemPrompt || DEFAULT_SYSTEM
